@@ -1,11 +1,12 @@
 extern crate libc;
 
-use std::io::prelude::*;
 use std::fs::{OpenOptions, File};
 use std::io::{Result, Error};
 
 #[cfg(test)]
 use std::io::BufReader;
+#[cfg(test)]
+use std::io::prelude::*;
 
 // Borrowed from https://github.com/stemjail/tty-rs
 mod pty {
