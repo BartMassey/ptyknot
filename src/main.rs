@@ -9,32 +9,16 @@ mod pty {
     use std::path::*;
     use std::io::{Result, Error};
     use std::os::unix::io::AsRawFd;
-    use libc::*;
-
-    const TIOCGPTN: u64 = 0x80045430;
-
-    fn ptsindex<T>(master: &mut T)
-       -> Result<u32> where T: AsRawFd {
-        let mut idx: c_uint = 0;
-        match unsafe { ioctl(master.as_raw_fd(),
-                             TIOCGPTN,
-                             &mut idx) } {
-            0 => Ok(idx),
-            _ => Err(Error::last_os_error()),
-        }
-    }
-
-    pub fn ptsname<T>(master: &mut T) -> Result<PathBuf> where T: AsRawFd {
-        Ok(Path::new("/dev/pts")
-                 .join(format!("{}", try!(ptsindex(master)))))
-    }
+    use std::ffi::{CStr, OsString};
+    use std::os::unix::ffi::OsStringExt;
 
     mod raw {
-        use libc::c_int;
+        use libc::{c_int, c_char};
 
         extern {
             pub fn grantpt(fd: c_int) -> c_int;
             pub fn unlockpt(fd: c_int) -> c_int;
+            pub fn ptsname(fd: c_int) -> *const c_char;
         }
     }
 
@@ -50,6 +34,18 @@ mod pty {
             0 => Ok(()),
             _ => Err(Error::last_os_error()),
         }
+    }
+
+    // getcwd implementation used as reference
+    pub fn ptsname<T>(master: &mut T) -> Result<PathBuf> where T: AsRawFd {
+        let ptr = unsafe { raw::ptsname(master.as_raw_fd()) };
+        if ptr.is_null() {
+            return Err(Error::last_os_error());
+        }
+        let cstr = unsafe { CStr::from_ptr(ptr) };
+        let buf = cstr.to_str().expect("pathname not utf8");
+        let os_string = OsString::from_vec(buf.as_bytes().to_vec());
+        Ok(PathBuf::from(os_string))
     }
 }
 
