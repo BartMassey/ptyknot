@@ -7,7 +7,7 @@ use std::io::{Error, BufReader};
 // Borrowed from https://github.com/stemjail/tty-rs
 mod pty {
     use std::path::*;
-    use std::io::{Result, Error};
+    use std::io::{Result, Error, ErrorKind};
     use std::os::unix::io::AsRawFd;
     use std::ffi::{CStr, OsString};
     use std::os::unix::ffi::OsStringExt;
@@ -40,12 +40,14 @@ mod pty {
 
     // getcwd implementation used as reference
     pub fn ptsname<T>(master: &mut T) -> Result<PathBuf> where T: AsRawFd {
-        let ptr = unsafe { raw::ptsname(master.as_raw_fd()) };
-        if ptr.is_null() {
-            return Err(Error::last_os_error());
-        }
-        let cstr = unsafe { CStr::from_ptr(ptr) };
-        let buf = cstr.to_str().expect("pathname not utf8");
+        let cstr = match unsafe { raw::ptsname(master.as_raw_fd()).as_ref() } {
+            None => return Err(Error::last_os_error()),
+            Some(ptr) => unsafe { CStr::from_ptr(ptr) }
+        };
+        let buf = match cstr.to_str() {
+            Ok(s) => s,
+            Err(e) => return Err(Error::new(ErrorKind::InvalidData, e))
+        };
         let os_string = OsString::from_vec(buf.as_bytes().to_vec());
         Ok(PathBuf::from(os_string))
     }
