@@ -3,7 +3,6 @@ extern crate libc;
 use std::io::prelude::*;
 use std::fs::OpenOptions;
 use std::io::{Error, stderr, BufReader};
-//use std::os::unix::io::AsRawFd;
 
 // Borrowed from https://github.com/stemjail/tty-rs
 mod pty {
@@ -61,7 +60,6 @@ pub fn main() {
     
     pty::grantpt(&mut master).expect("could not grant pty");
     pty::unlockpt(&mut master).expect("could not unlock pty");
-//  let master_fd = master.as_raw_fd();
 
     let pid = unsafe{ libc::fork() };
     match pid {
@@ -81,10 +79,6 @@ pub fn main() {
             let mut slave = OpenOptions::new()
                             .read(true).write(true)
                             .open(slave_name).expect("cannot open pty");
-//          drop(slave);
-//          let mut tty = OpenOptions::new()
-//                        .write(true).open("/dev/tty")
-//                        .expect("cannot open /dev/tty");
             slave.write("hello world\n".as_bytes())
                  .expect("cannot write to /dev/pty");
             slave.flush().expect("cannot flush /dev/pty");
@@ -100,20 +94,7 @@ pub fn main() {
             let mut message = String::new();
             master_buf.read_line(&mut message)
                       .expect("could not read message");
-            println!("received message: {}", message);
-
-//          let mut mbuf = [0u8; 64];
-//          let nread: libc::ssize_t = unsafe {
-//              libc::read(master_fd,
-//                         mbuf.as_mut_ptr() as *mut libc::c_void,
-//                         mbuf.len() as libc::size_t) };
-//          assert!(nread != -1);
-//          let mut mvec: Vec<u8> = Vec::with_capacity(nread as usize);
-//          for i in 0..nread {
-//              mvec.push(mbuf[i as usize]);
-//          }
-//          let message = String::from_utf8(mvec).expect("message not utf8");
-//          println!("received message ({} bytes): {} [{}]", nread, message, mbuf[11]);
+            print!("received message: {}", message);
         }
     }
 }
