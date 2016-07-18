@@ -3,9 +3,9 @@ name = "ptyknot"
 version = "0.1.0"
 authors = ["Bart Massey <bart.massey@gmail.com>"]
 
-[[bin]]
+[lib]
 name = "ptyknot"
-path = "src/main.rs"
+path = "src/lib.rs"
 
 [dependencies]
 libc = "*"

@@ -1,8 +1,11 @@
 extern crate libc;
 
 use std::io::prelude::*;
-use std::fs::OpenOptions;
-use std::io::{Error, BufReader};
+use std::fs::{OpenOptions, File};
+use std::io::{Result, Error};
+
+#[cfg(test)]
+use std::io::BufReader;
 
 // Borrowed from https://github.com/stemjail/tty-rs
 mod pty {
@@ -52,19 +55,21 @@ mod pty {
         Ok(PathBuf::from(os_string))
     }
 
-    pub fn waitpid(pid: pid_t) -> Result<i32> {
+    pub fn waitpid(pid: i32) -> Result<i32> {
         let mut status: c_int = 0;
-        match unsafe { raw_waitpid(pid, &mut status as *mut c_int, 0) } {
+        match unsafe { raw_waitpid(pid as pid_t,
+                                   &mut status as *mut c_int,
+                                   0) } {
             -1 => Err(Error::last_os_error()),
             _ => Ok(status as i32)
         }
     }
 }
 
-pub fn main() {
+fn _ptyknot<'a>(action: fn ()) -> Result<Option<(File, i32)>> {
     let mut master = OpenOptions::new()
-                    .read(true).write(true)
-                    .open("/dev/ptmx").expect("cannot open ptmx");
+                 .read(true).write(true)
+                 .open("/dev/ptmx").expect("cannot open ptmx");
     pty::grantpt(&mut master).expect("could not grant pty");
     pty::unlockpt(&mut master).expect("could not unlock pty");
     let pid = unsafe{ libc::fork() };
@@ -81,20 +86,50 @@ pub fn main() {
             if unsafe { libc::setsid() } < 0 {
                 panic!("setsid failed");
             }
-            let mut slave = OpenOptions::new()
-                            .read(true).write(true)
-                            .open(slave_name).expect("cannot open pty");
-            slave.write("hello world\n".as_bytes())
-                 .expect("cannot write to /dev/pty");
-            slave.flush().expect("cannot flush /dev/pty");
+            let slave = OpenOptions::new()
+                        .read(true).write(true)
+                        .open(slave_name).expect("cannot open pty");
+            drop(slave);
+            action();
+            Ok(None)
         },
-        _ => {
-            let mut master_buf = BufReader::new(&master);
-            let mut message = String::new();
-            master_buf.read_line(&mut message)
-                      .expect("could not read message");
-            assert!(message.trim() == "hello world");
-            assert_eq!(pty::waitpid(pid).expect("child exited abnormally"), 0);
-        }
+        _ => Ok(Some((master, pid)))
     }
+}
+
+pub fn ptyknot(action: fn ()) -> Result<(File, i32)> {
+    match _ptyknot(action) {
+        Ok(Some(r)) => Ok(r),
+        Ok(None) => panic!("internal error: _ptyknot returned None"),
+        Err(e) => Err(e)
+    }
+}
+
+pub fn reap(pid: i32) -> Result<()> {
+    match pty::waitpid(pid) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e)
+    }
+}
+
+#[cfg(test)]
+fn slave() {
+    let mut tty = OpenOptions::new()
+                  .write(true)
+                  .open("/dev/tty")
+                  .expect("cannot open /dev/tty");
+    tty.write("hello world\n".as_bytes())
+       .expect("cannot write to /dev/tty");
+    tty.flush().expect("cannot flush /dev/tty");
+}
+
+#[test]
+fn it_works() {
+    let (master, pid) = ptyknot(slave).expect("ptyknot fail");
+    let mut master_buf = BufReader::new(&master);
+    let mut message = String::new();
+    master_buf.read_line(&mut message)
+              .expect("could not read message");
+    assert!(message.trim() == "hello world");
+    reap(pid).expect("could not reap child");
 }
