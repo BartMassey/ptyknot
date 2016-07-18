@@ -67,7 +67,7 @@ mod pty {
     }
 }
 
-fn _ptyknot<'a>(action: fn ()) -> Result<Option<(File, i32)>> {
+fn _ptyknot(action: fn ()) -> Result<Option<(File, i32)>> {
     let mut master = OpenOptions::new()
                  .read(true).write(true)
                  .open("/dev/ptmx").expect("cannot open ptmx");
@@ -106,12 +106,7 @@ pub fn ptyknot(action: fn ()) -> Result<(File, i32)> {
     }
 }
 
-pub fn reap(pid: i32) -> Result<()> {
-    match pty::waitpid(pid) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e)
-    }
-}
+pub use pty::waitpid as reap;
 
 #[cfg(test)]
 fn slave() {
@@ -132,5 +127,6 @@ fn it_works() {
     master_buf.read_line(&mut message)
               .expect("could not read message");
     assert!(message.trim() == "hello world");
-    reap(pid).expect("could not reap child");
+    let status = reap(pid).expect("could not reap child");
+    assert_eq!(status, 0);
 }
