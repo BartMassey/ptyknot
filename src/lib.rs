@@ -98,15 +98,20 @@ fn _ptyknot<F: Fn()>(action: F) -> Result<Option<(File, i32)>> {
             // https://www.win.tue.nl/~aeb/linux/lk/lk-10.html
             // at "Getting a controlling tty" for helping
             // understand this mess.
-            if unsafe { libc::setsid() } < 0 {
+            //
+            // First, get rid of the current controlling terminal.
+            if unsafe { libc::setsid() } == -1 {
                 panic!("setsid failed");
             }
+            // Now, open the pty, which will set it
+            // as the controlling terminal.
             let slave = OpenOptions::new()
                         .read(true).write(true)
                         .open(slave_name).expect("cannot open pty");
+            // We are done with the pty now and can close it.
             drop(slave);
             action();
-            Ok(None)
+            std::process::exit(0)
         },
         _ => Ok(Some((master, pid)))
     }
@@ -153,9 +158,10 @@ pub fn ptyknot<F: Fn()>(action: F) -> Result<(File, i32)> {
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// let (_, pid) = ptyknot::ptyknot({||()}).expect("cannot create slave");
+/// ```
+/// let (master, pid) = ptyknot::ptyknot({||()}).expect("cannot create slave");
 /// assert_eq!(ptyknot::reap(pid).unwrap(), 0);
+/// drop(master);
 /// ```
 pub use pty::waitpid as reap;
 
