@@ -1,3 +1,15 @@
+//! Copyright © 2016 Bart Massey
+//!
+//! Start a child process running a specified action, with
+//! a new pseudo-tty as its controlling terminal. Give the
+//! caller the master side of that terminal for manipulation,
+//! along with the process ID of the child. The caller can
+//! then later wait for the child to exit.
+//!
+//! This work is made available under the "MIT License".
+//! Please see the file COPYING in this distribution
+//! for license terms.
+
 extern crate libc;
 
 use std::fs::{OpenOptions, File};
@@ -8,7 +20,7 @@ use std::io::BufReader;
 #[cfg(test)]
 use std::io::prelude::*;
 
-// Borrowed from https://github.com/stemjail/tty-rs
+// Most code borrowed from https://github.com/stemjail/tty-rs .
 mod pty {
     use std::path::*;
     use std::io::{Result, Error, ErrorKind};
@@ -42,7 +54,7 @@ mod pty {
         }
     }
 
-    // getcwd implementation used as reference
+    // Rust getcwd implementation used as reference.
     pub fn ptsname<T>(master: &mut T) -> Result<PathBuf> where T: AsRawFd {
         let cstr = match unsafe { raw::ptsname(master.as_raw_fd()).as_ref() } {
             None => return Err(Error::last_os_error()),
@@ -67,7 +79,7 @@ mod pty {
     }
 }
 
-fn _ptyknot(action: fn ()) -> Result<Option<(File, i32)>> {
+fn _ptyknot<F: Fn()>(action: F) -> Result<Option<(File, i32)>> {
     let mut master = OpenOptions::new()
                  .read(true).write(true)
                  .open("/dev/ptmx").expect("cannot open ptmx");
@@ -82,8 +94,10 @@ fn _ptyknot(action: fn ()) -> Result<Option<(File, i32)>> {
             let slave_name = pty::ptsname(&mut master)
                              .expect("cannot get pty name");
             drop(master);
+            // Thanks much to
             // https://www.win.tue.nl/~aeb/linux/lk/lk-10.html
-            // at "Getting a controlling tty"
+            // at "Getting a controlling tty" for helping
+            // understand this mess.
             if unsafe { libc::setsid() } < 0 {
                 panic!("setsid failed");
             }
@@ -98,7 +112,35 @@ fn _ptyknot(action: fn ()) -> Result<Option<(File, i32)>> {
     }
 }
 
-pub fn ptyknot(action: fn ()) -> Result<(File, i32)> {
+/// Start a child process running the given action, with
+/// a controlling tty attached to a pseudo-terminal. Returns
+/// the master side of the pseudo-terminal as a file, plus
+/// the process ID of the child process.
+///
+/// # Examples
+///
+/// ```
+/// use std::fs::OpenOptions;
+/// use std::io::{Write, BufRead, BufReader};
+///
+/// fn slave() {
+///     let mut tty = OpenOptions::new()
+///                   .write(true)
+///                   .open("/dev/tty")
+///                   .expect("cannot open /dev/tty");
+///     tty.write("hello world\n".as_bytes())
+///        .expect("cannot write to /dev/tty");
+///     tty.flush().expect("cannot flush /dev/tty");
+/// }
+/// 
+/// let (master, pid) = ptyknot::ptyknot(slave)
+///                     .expect("cannot create slave");
+/// let mut master_buf = BufReader::new(&master);
+/// let mut message = String::new();
+/// master_buf.read_line(&mut message)
+///           .expect("could not read message");
+/// ```
+pub fn ptyknot<F: Fn()>(action: F) -> Result<(File, i32)> {
     match _ptyknot(action) {
         Ok(Some(r)) => Ok(r),
         Ok(None) => panic!("internal error: _ptyknot returned None"),
@@ -106,6 +148,15 @@ pub fn ptyknot(action: fn ()) -> Result<(File, i32)> {
     }
 }
 
+/// Wait for the specified `ptyknot()` child process
+/// to exit, then return the exit status.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// let (_, pid) = ptyknot::ptyknot({||()}).expect("cannot create slave");
+/// assert_eq!(ptyknot::reap(pid).unwrap(), 0);
+/// ```
 pub use pty::waitpid as reap;
 
 #[cfg(test)]
