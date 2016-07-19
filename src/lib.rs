@@ -68,6 +68,16 @@ mod pty {
         Ok(PathBuf::from(os_string))
     }
 
+    /// Wait for the specified `ptyknot()` child process
+    /// to exit, then return the exit status.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (master, pid) = ptyknot::ptyknot({||()}).expect("cannot create slave");
+    /// assert_eq!(ptyknot::waitpid(pid).unwrap(), 0);
+    /// drop(master);
+    /// ```
     pub fn waitpid(pid: i32) -> Result<i32> {
         let mut status: c_int = 0;
         match unsafe { raw_waitpid(pid as pid_t,
@@ -79,7 +89,35 @@ mod pty {
     }
 }
 
-fn _ptyknot<F: Fn()>(action: F) -> Result<Option<(File, i32)>> {
+/// Start a child process running the given action, with
+/// a controlling tty attached to a pseudo-terminal. Returns
+/// the master side of the pseudo-terminal as a file, plus
+/// the process ID of the child process.
+///
+/// # Examples
+///
+/// ```
+/// use std::fs::OpenOptions;
+/// use std::io::{Write, BufRead, BufReader};
+///
+/// fn slave() {
+///     let mut tty = OpenOptions::new()
+///                   .write(true)
+///                   .open("/dev/tty")
+///                   .expect("cannot open /dev/tty");
+///     tty.write("hello world\n".as_bytes())
+///        .expect("cannot write to /dev/tty");
+///     tty.flush().expect("cannot flush /dev/tty");
+/// }
+/// 
+/// let (master, pid) = ptyknot::ptyknot(slave)
+///                     .expect("cannot create slave");
+/// let mut master_buf = BufReader::new(&master);
+/// let mut message = String::new();
+/// master_buf.read_line(&mut message)
+///           .expect("could not read message");
+/// ```
+pub fn ptyknot<F: Fn()>(action: F) -> Result<(File, i32)> {
     let mut master = OpenOptions::new()
                  .read(true).write(true)
                  .open("/dev/ptmx").expect("cannot open ptmx");
@@ -113,57 +151,11 @@ fn _ptyknot<F: Fn()>(action: F) -> Result<Option<(File, i32)>> {
             action();
             std::process::exit(0)
         },
-        _ => Ok(Some((master, pid)))
+        _ => Ok((master, pid))
     }
 }
 
-/// Start a child process running the given action, with
-/// a controlling tty attached to a pseudo-terminal. Returns
-/// the master side of the pseudo-terminal as a file, plus
-/// the process ID of the child process.
-///
-/// # Examples
-///
-/// ```
-/// use std::fs::OpenOptions;
-/// use std::io::{Write, BufRead, BufReader};
-///
-/// fn slave() {
-///     let mut tty = OpenOptions::new()
-///                   .write(true)
-///                   .open("/dev/tty")
-///                   .expect("cannot open /dev/tty");
-///     tty.write("hello world\n".as_bytes())
-///        .expect("cannot write to /dev/tty");
-///     tty.flush().expect("cannot flush /dev/tty");
-/// }
-/// 
-/// let (master, pid) = ptyknot::ptyknot(slave)
-///                     .expect("cannot create slave");
-/// let mut master_buf = BufReader::new(&master);
-/// let mut message = String::new();
-/// master_buf.read_line(&mut message)
-///           .expect("could not read message");
-/// ```
-pub fn ptyknot<F: Fn()>(action: F) -> Result<(File, i32)> {
-    match _ptyknot(action) {
-        Ok(Some(r)) => Ok(r),
-        Ok(None) => panic!("internal error: _ptyknot returned None"),
-        Err(e) => Err(e)
-    }
-}
-
-/// Wait for the specified `ptyknot()` child process
-/// to exit, then return the exit status.
-///
-/// # Examples
-///
-/// ```
-/// let (master, pid) = ptyknot::ptyknot({||()}).expect("cannot create slave");
-/// assert_eq!(ptyknot::reap(pid).unwrap(), 0);
-/// drop(master);
-/// ```
-pub use pty::waitpid as reap;
+pub use pty::waitpid;
 
 #[cfg(test)]
 fn slave() {
@@ -184,6 +176,6 @@ fn it_works() {
     master_buf.read_line(&mut message)
               .expect("could not read message");
     assert!(message.trim() == "hello world");
-    let status = reap(pid).expect("could not reap child");
+    let status = waitpid(pid).expect("could not reap child");
     assert_eq!(status, 0);
 }
