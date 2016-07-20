@@ -1,14 +1,10 @@
-//! Copyright © 2016 Bart Massey
+//! Child process and pty support.
 //!
 //! Start a child process running a specified action, with
 //! a new pseudo-tty as its controlling terminal. Give the
 //! caller the master side of that terminal for manipulation,
 //! along with the process ID of the child. The caller can
 //! then later wait for the child to exit.
-//!
-//! This work is made available under the "MIT License".
-//! Please see the file COPYING in this distribution
-//! for license terms.
 
 extern crate libc;
 
@@ -20,7 +16,7 @@ use std::io::BufReader;
 #[cfg(test)]
 use std::io::prelude::*;
 
-mod pty;
+pub mod pty;
 
 pub struct PtyKnot {
     pub pid: i32,

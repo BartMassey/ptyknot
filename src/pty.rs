@@ -1,4 +1,10 @@
-// Most code borrowed from https://github.com/stemjail/tty-rs .
+//! Low-level pseudo-tty setup routines.
+//!
+//! This module contains several pty setup functions and a
+//! "special" `waitpid()` implementation.
+//!
+//! Much of this is code borrowed from <http://github.com/stemjail/tty-rs>.
+
 use std::path::*;
 use std::io::{Result, Error, ErrorKind};
 use std::os::unix::io::AsRawFd;
@@ -17,6 +23,9 @@ mod raw {
     }
 }
 
+/// Change the mode and owner of the slave pty associated
+/// with a given open master. See `grantpt(3)` in the UNIX
+/// manual pages for details.
 pub fn grantpt<T>(master: &mut T) -> Result<()> where T: AsRawFd {
     match unsafe { raw::grantpt(master.as_raw_fd()) } {
         0 => Ok(()),
@@ -24,6 +33,9 @@ pub fn grantpt<T>(master: &mut T) -> Result<()> where T: AsRawFd {
     }
 }
 
+/// "Unlocks" the slave pty associated with the give nopen
+/// master. See `unlockpt(3)` in the UNIX manual pages for
+/// details.
 pub fn unlockpt<T>(master: &mut T) -> Result<()> where T: AsRawFd {
     match unsafe { raw::unlockpt(master.as_raw_fd()) } {
         0 => Ok(()),
@@ -31,7 +43,9 @@ pub fn unlockpt<T>(master: &mut T) -> Result<()> where T: AsRawFd {
     }
 }
 
-// Rust getcwd implementation used as reference.
+/// Returns the name of the slave pty associated with the
+/// given open master. See `unlockpt(3)` in the UNIX manual
+/// pages for details.
 pub fn ptsname<T>(master: &mut T) -> Result<PathBuf> where T: AsRawFd {
     let cstr = match unsafe { raw::ptsname(master.as_raw_fd()).as_ref() } {
         None => return Err(Error::last_os_error()),
@@ -45,6 +59,9 @@ pub fn ptsname<T>(master: &mut T) -> Result<PathBuf> where T: AsRawFd {
     Ok(PathBuf::from(os_string))
 }
 
+/// Blocking wait until process completes. Returns the
+/// process exit status. See `waitpid(3)` in the UNIX manual
+/// pages for details.
 pub fn waitpid(pid: i32) -> Result<i32> {
     let mut status: c_int = 0;
     match unsafe { raw_waitpid(pid as pid_t,
