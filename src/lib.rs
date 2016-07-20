@@ -68,16 +68,6 @@ mod pty {
         Ok(PathBuf::from(os_string))
     }
 
-    /// Wait for the specified `ptyknot()` child process
-    /// to exit, then return the exit status.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let knot = ptyknot::ptyknot({||()}).expect("cannot create slave");
-    /// assert_eq!(ptyknot::waitpid(knot.pid).unwrap(), 0);
-    /// drop(knot.pty);
-    /// ```
     pub fn waitpid(pid: i32) -> Result<i32> {
         let mut status: c_int = 0;
         match unsafe { raw_waitpid(pid as pid_t,
@@ -94,10 +84,18 @@ pub struct PtyKnot {
     pub pty: File
 }
 
-/// Start a child process running the given action, with
-/// a controlling tty attached to a pseudo-terminal. Returns
-/// the master side of the pseudo-terminal as a file, plus
-/// the process ID of the child process.
+impl Drop for PtyKnot {
+    fn drop(&mut self) {
+        let status = pty::waitpid(self.pid).expect("could not reap child");
+        assert_eq!(status, 0);
+    }
+}
+
+/// Start a child process running the given action, returning
+/// a `PtyKnot` struct for control and communication. When the
+/// the structure's destructor is called, it will wait to reap
+/// the child process and panic if it has crashed or exited with
+/// non-zero status.
 ///
 /// # Examples
 ///
@@ -116,10 +114,10 @@ pub struct PtyKnot {
 /// }
 /// 
 /// let knot = ptyknot::ptyknot(slave).expect("cannot create slave");
-/// let mut master_buf = BufReader::new(&knot.pty);
+/// let mut master = BufReader::new(&knot.pty);
 /// let mut message = String::new();
-/// master_buf.read_line(&mut message)
-///           .expect("could not read message");
+/// master.read_line(&mut message)
+///       .expect("could not read message");
 /// ```
 pub fn ptyknot<F: Fn()>(action: F) -> Result<PtyKnot> {
     let mut master = OpenOptions::new()
@@ -159,8 +157,6 @@ pub fn ptyknot<F: Fn()>(action: F) -> Result<PtyKnot> {
     }
 }
 
-pub use pty::waitpid;
-
 #[cfg(test)]
 fn slave() {
     let mut tty = OpenOptions::new()
@@ -175,11 +171,9 @@ fn slave() {
 #[test]
 fn it_works() {
     let knot = ptyknot(slave).expect("ptyknot fail");
-    let mut master_buf = BufReader::new(&knot.pty);
+    let mut master = BufReader::new(&knot.pty);
     let mut message = String::new();
-    master_buf.read_line(&mut message)
-              .expect("could not read message");
+    master.read_line(&mut message)
+          .expect("could not read message");
     assert!(message.trim() == "hello world");
-    let status = waitpid(knot.pid).expect("could not reap child");
-    assert_eq!(status, 0);
 }
