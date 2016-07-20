@@ -74,9 +74,9 @@ mod pty {
     /// # Examples
     ///
     /// ```
-    /// let (master, pid) = ptyknot::ptyknot({||()}).expect("cannot create slave");
-    /// assert_eq!(ptyknot::waitpid(pid).unwrap(), 0);
-    /// drop(master);
+    /// let knot = ptyknot::ptyknot({||()}).expect("cannot create slave");
+    /// assert_eq!(ptyknot::waitpid(knot.pid).unwrap(), 0);
+    /// drop(knot.pty);
     /// ```
     pub fn waitpid(pid: i32) -> Result<i32> {
         let mut status: c_int = 0;
@@ -87,6 +87,11 @@ mod pty {
             _ => Ok(status as i32)
         }
     }
+}
+
+pub struct PtyKnot {
+    pub pid: i32,
+    pub pty: File
 }
 
 /// Start a child process running the given action, with
@@ -110,14 +115,13 @@ mod pty {
 ///     tty.flush().expect("cannot flush /dev/tty");
 /// }
 /// 
-/// let (master, pid) = ptyknot::ptyknot(slave)
-///                     .expect("cannot create slave");
-/// let mut master_buf = BufReader::new(&master);
+/// let knot = ptyknot::ptyknot(slave).expect("cannot create slave");
+/// let mut master_buf = BufReader::new(&knot.pty);
 /// let mut message = String::new();
 /// master_buf.read_line(&mut message)
 ///           .expect("could not read message");
 /// ```
-pub fn ptyknot<F: Fn()>(action: F) -> Result<(File, i32)> {
+pub fn ptyknot<F: Fn()>(action: F) -> Result<PtyKnot> {
     let mut master = OpenOptions::new()
                  .read(true).write(true)
                  .open("/dev/ptmx").expect("cannot open ptmx");
@@ -151,7 +155,7 @@ pub fn ptyknot<F: Fn()>(action: F) -> Result<(File, i32)> {
             action();
             std::process::exit(0)
         },
-        _ => Ok((master, pid))
+        _ => Ok(PtyKnot{pid: pid, pty: master})
     }
 }
 
@@ -170,12 +174,12 @@ fn slave() {
 
 #[test]
 fn it_works() {
-    let (master, pid) = ptyknot(slave).expect("ptyknot fail");
-    let mut master_buf = BufReader::new(&master);
+    let knot = ptyknot(slave).expect("ptyknot fail");
+    let mut master_buf = BufReader::new(&knot.pty);
     let mut message = String::new();
     master_buf.read_line(&mut message)
               .expect("could not read message");
     assert!(message.trim() == "hello world");
-    let status = waitpid(pid).expect("could not reap child");
+    let status = waitpid(knot.pid).expect("could not reap child");
     assert_eq!(status, 0);
 }
