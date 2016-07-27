@@ -1,3 +1,8 @@
+// Copyright © 2016 Bart Massey
+// This work is made available under the "MIT License".
+// Please see the file COPYING in this distribution for
+// license terms.
+
 //! Low-level pseudo-tty setup routines.
 //!
 //! This module contains several pty setup functions and a

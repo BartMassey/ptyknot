@@ -1,3 +1,8 @@
+// Copyright © 2016 Bart Massey
+// This work is made available under the "MIT License".
+// Please see the file COPYING in this distribution for
+// license terms.
+
 //! Child process and pty support.
 //!
 //! Start a child process running a specified action, with
