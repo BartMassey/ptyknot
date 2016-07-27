@@ -12,11 +12,12 @@
 
 use std::path::*;
 use std::io::{Result, Error, ErrorKind};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{RawFd, AsRawFd};
 use std::ffi::{CStr, OsString};
 use std::os::unix::ffi::OsStringExt;
 use libc::{c_int, pid_t};
 use libc::waitpid as raw_waitpid;
+use libc::dup2 as raw_dup2;
 
 mod raw {
     use libc::{c_int, c_char};
@@ -33,8 +34,8 @@ mod raw {
 /// manual pages for details.
 pub fn grantpt<T>(master: &mut T) -> Result<()> where T: AsRawFd {
     match unsafe { raw::grantpt(master.as_raw_fd()) } {
-        0 => Ok(()),
-        _ => Err(Error::last_os_error()),
+        -1 => Err(Error::last_os_error()),
+        _ => Ok(())
     }
 }
 
@@ -43,8 +44,8 @@ pub fn grantpt<T>(master: &mut T) -> Result<()> where T: AsRawFd {
 /// details.
 pub fn unlockpt<T>(master: &mut T) -> Result<()> where T: AsRawFd {
     match unsafe { raw::unlockpt(master.as_raw_fd()) } {
-        0 => Ok(()),
-        _ => Err(Error::last_os_error()),
+        -1 => Err(Error::last_os_error()),
+        _ => Ok(())
     }
 }
 
@@ -74,5 +75,16 @@ pub fn waitpid(pid: i32) -> Result<i32> {
                                0) } {
         -1 => Err(Error::last_os_error()),
         _ => Ok(status as i32)
+    }
+}
+
+/// Make the underlying file of `dst` refer to the
+/// underlying file of `src`. If `dst` is open, it will
+/// be closed first. See `dup2(2)` in the UNIX manual
+/// pages for details.
+pub fn dup2<T: AsRawFd>(old: &T, new_fd: RawFd) -> Result<()> {
+    match unsafe { raw_dup2(old.as_raw_fd(), new_fd) } {
+        -1 => Err(Error::last_os_error()),
+        _ => Ok(())
     }
 }

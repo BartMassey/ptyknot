@@ -91,12 +91,16 @@ pub fn make_pipe<T: AsRawFd>(direction: PipeDirection, slave_file: T)
 }
 
 impl Plumbing {
-    pub fn plumb_slave(&self) {
+
+    /// Implement the slave side of the plumbing by ensuring
+    /// that the slave end of the pipe is attached to the
+    /// previously-supplied file descriptor.
+    pub fn plumb_slave(&self) -> Result<()> {
         let my_end = match self.direction {
-            MasterRead => self.pipe.write_end
-            MasterWrite => self.pipe.read_end
+            PipeDirection::MasterRead => &self.pipe.write_end,
+            PipeDirection::MasterWrite => &self.pipe.read_end
         };
-        pipefile::dup2(my_end, self.fd);
+        pty::dup2(my_end, self.fd)
     }
 }
 
