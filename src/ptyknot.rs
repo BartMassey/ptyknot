@@ -14,9 +14,11 @@
 #![warn(missing_docs)]
 
 extern crate libc;
+extern crate pipefile;
 
 use std::fs::{OpenOptions, File};
 use std::io::{Result, Error};
+use std::os::unix::io::{RawFd, AsRawFd};
 
 #[cfg(test)]
 use std::io::BufReader;
@@ -56,6 +58,46 @@ pub fn make_pty() -> File {
     pty::grantpt(&mut master).expect("could not grant pty");
     pty::unlockpt(&mut master).expect("could not unlock pty");
     master
+}
+
+/// Which direction (from the master's point of view)
+/// a pipe runs.
+pub enum PipeDirection {
+    /// Master reads from pipe, slave writes.
+    MasterRead,
+    /// Master writes to pipe, slave reads.
+    MasterWrite
+}
+
+/// Information needed during the pipe plumbing process.
+pub struct Plumbing {
+    direction: PipeDirection,
+    pipe: pipefile::PipeFile,
+    fd: RawFd
+}
+
+/// Create a new pipe running in the specified direction,
+/// and remember the file descriptor of the given file. This
+/// will later allow the slave to re-attach the fd to the
+/// other end of the pipe.
+pub fn make_pipe<T: AsRawFd>(direction: PipeDirection, slave_file: T)
+       -> Result<Plumbing> {
+    let pipe = try!(pipefile::pipe());
+    Ok(Plumbing {
+        direction: direction,
+        pipe: pipe,
+        fd: slave_file.as_raw_fd()
+    })
+}
+
+impl Plumbing {
+    pub fn plumb_slave(&self) {
+        let my_end = match self.direction {
+            MasterRead => self.pipe.write_end
+            MasterWrite => self.pipe.read_end
+        };
+        pipefile::dup2(my_end, self.fd);
+    }
 }
 
 /// Start a child process running the given action,
