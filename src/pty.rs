@@ -11,15 +11,16 @@
 //! Much of this is code borrowed from <http://github.com/stemjail/tty-rs>.
 
 use std::path::*;
+use std::fs::File;
 use std::io::{Result, Error, ErrorKind};
-use std::os::unix::io::{RawFd, AsRawFd};
+use std::os::unix::io::{RawFd, AsRawFd, FromRawFd};
 use std::ffi::{CStr, OsString};
 use std::os::unix::ffi::OsStringExt;
 use libc::{c_int, pid_t};
 
 mod raw {
     use libc::{c_int, c_char};
-    pub use libc::{waitpid, dup2, close};
+    pub use libc::{waitpid, dup2, close, pipe};
 
     extern {
         pub fn grantpt(fd: c_int) -> c_int;
@@ -81,18 +82,34 @@ pub fn waitpid(pid: i32) -> Result<i32> {
 /// underlying file of `src`. If `dst` is open, it will
 /// be closed first. See `dup2(2)` in the UNIX manual
 /// pages for details.
-pub fn dup2<T: AsRawFd>(old: &T, new_fd: RawFd) -> Result<()> {
-    match unsafe { raw::dup2(old.as_raw_fd(), new_fd) } {
+pub fn dup2(old: RawFd, new_fd: RawFd) -> Result<()> {
+    match unsafe { raw::dup2(old, new_fd) } {
         -1 => Err(Error::last_os_error()),
         _ => Ok(())
     }
 }
 
-/// Close the underlying file descriptor of the given
-/// object. Subsequent accesses will fail.
-pub fn close<T: AsRawFd>(fd: &T) -> Result<()> {
-    match unsafe { raw::close(fd.as_raw_fd()) } {
+/// Close a file descriptor.
+pub fn close(fd: RawFd) -> Result<()> {
+    match unsafe { raw::close(fd) } {
         -1 => { return Err(Error::last_os_error()) },
         _ => Ok(())
+    }
+}
+
+/// Make a new `File` accessing the underlying file
+/// descriptor.
+pub fn from_raw_fd(fd: RawFd) -> File {
+    unsafe { FromRawFd::from_raw_fd(fd) }
+}
+
+/// Make a new pipe. The 0-th side of the resulting array is
+/// the read side. The 1-th side is the write side. See
+/// `pipe(2)` in the UNIX manual pages for details.
+pub fn pipe() -> Result<[RawFd; 2]> {
+    let mut pipefds: [RawFd; 2] = [0; 2];
+    match unsafe { raw::pipe((&mut pipefds).as_mut_ptr()) } {
+        -1 => { return Err(Error::last_os_error()) },
+        _ => Ok(pipefds)
     }
 }

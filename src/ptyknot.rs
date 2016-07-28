@@ -14,7 +14,6 @@
 #![warn(missing_docs)]
 
 extern crate libc;
-extern crate pipefile;
 
 use std::fs::{OpenOptions, File};
 use std::io::{Result, Error};
@@ -71,8 +70,8 @@ pub enum PipeDirection {
 
 /// Information needed during the pipe plumbing process.
 pub struct Plumbing {
-    master: File,
-    slave: File,
+    master: RawFd,
+    slave: RawFd,
     fd: RawFd
 }
 
@@ -84,11 +83,11 @@ impl Plumbing {
     /// other end of the pipe.
     pub fn new(direction: PipeDirection, slave_file: RawFd)
            -> Result<Plumbing> {
-        let pipe = try!(pipefile::pipe());
+        let pipefds = try!(pty::pipe());
         let (master, slave) =
             match direction {
-                PipeDirection::MasterWrite => (pipe.write_end, pipe.read_end),
-                PipeDirection::MasterRead => (pipe.read_end, pipe.write_end),
+                PipeDirection::MasterWrite => (pipefds[1], pipefds[0]),
+                PipeDirection::MasterRead => (pipefds[0], pipefds[1])
             };
         Ok(Plumbing {
             master: master,
@@ -101,15 +100,15 @@ impl Plumbing {
     /// that the slave end of the pipe is attached to the
     /// previously-supplied file descriptor.
     pub fn plumb_slave(&self) -> Result<()> {
-        try!(pty::close(&self.master));
-        pty::dup2(&self.slave, self.fd)
+        try!(pty::close(self.master));
+        pty::dup2(self.slave, self.fd)
     }
 
     /// Extract the master side of the pipe for use by
     /// the parent.
     pub fn get_master(self) -> Result<File> {
-        try!(pty::close(&self.slave));
-        Ok(self.master)
+        try!(pty::close(self.slave));
+        Ok(pty::from_raw_fd(self.master))
     }
 }
 
