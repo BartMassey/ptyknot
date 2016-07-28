@@ -1,0 +1,11 @@
+[package]
+name = "piperef"
+version = "0.1.0"
+authors = ["Bart Massey <bart@cs.pdx.edu>"]
+
+[dependencies]
+libc = "*"
+
+[[bin]]
+name = "piperef"
+path = "piperef.rs"
