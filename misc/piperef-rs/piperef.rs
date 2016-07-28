@@ -8,34 +8,8 @@ use std::fs::File;
 use std::io::{Error, BufReader, BufRead};
 use std::os::unix::io::FromRawFd;
 
-macro_rules! check_cint {
-    ($cexp: expr) => (match unsafe { $cexp } {
-        -1 => { panic!(Error::last_os_error()); },
-        _ => ()
-    })
-}
-
-macro_rules! try_cint {
-    ($cexp: expr) => (match unsafe { $cexp } {
-        -1 => { panic!(Error::last_os_error()); },
-        r => r
-    })
-}
-
-macro_rules! check_cptr {
-    ($cexp: expr) => ({
-        let p = unsafe { $cexp };
-        if p.is_null() { panic!(Error::last_os_error()); };
-    })
-}
-
-macro_rules! try_cptr {
-    ($cexp: expr) => ({
-        let p = unsafe { $cexp };
-        if p.is_null() { panic!(Error::last_os_error()); };
-        p
-    })
-}
+#[macro_use]
+mod cmacros;
 
 fn main() {
     let mut pipefds = [0; 2];
@@ -62,4 +36,3 @@ fn main() {
     }
     print!("got {}", message);
 }
-
