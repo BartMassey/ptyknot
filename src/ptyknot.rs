@@ -72,16 +72,16 @@ pub enum PipeDirection {
 pub struct Plumbing {
     master: RawFd,
     slave: RawFd,
-    fd: RawFd
+    slave_target: RawFd
 }
 
 impl Plumbing {
 
     /// Create a new pipe running in the specified direction,
     /// and remember the file descriptor of the given file. This
-    /// will later allow the slave to re-attach the fd to the
+    /// will later allow the slave to attach `slave_target` to the
     /// other end of the pipe.
-    pub fn new(direction: PipeDirection, slave_file: RawFd)
+    pub fn new(direction: PipeDirection, slave_target: RawFd)
            -> Result<Plumbing> {
         let pipefds = try!(pty::pipe());
         let (master, slave) =
@@ -92,7 +92,7 @@ impl Plumbing {
         Ok(Plumbing {
             master: master,
             slave: slave,
-            fd: slave_file
+            slave_target: slave_target
         })
     }
 
@@ -101,7 +101,7 @@ impl Plumbing {
     /// previously-supplied file descriptor.
     pub fn plumb_slave(&self) -> Result<()> {
         try!(pty::close(self.master));
-        pty::dup2(self.slave, self.fd)
+        pty::dup2(self.slave, self.slave_target)
     }
 
     /// Extract the master side of the pipe for use by
