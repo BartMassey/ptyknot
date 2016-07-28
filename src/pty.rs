@@ -16,11 +16,10 @@ use std::os::unix::io::{RawFd, AsRawFd};
 use std::ffi::{CStr, OsString};
 use std::os::unix::ffi::OsStringExt;
 use libc::{c_int, pid_t};
-use libc::waitpid as raw_waitpid;
-use libc::dup2 as raw_dup2;
 
 mod raw {
     use libc::{c_int, c_char};
+    pub use libc::{waitpid, dup2, close};
 
     extern {
         pub fn grantpt(fd: c_int) -> c_int;
@@ -70,9 +69,9 @@ pub fn ptsname<T>(master: &mut T) -> Result<PathBuf> where T: AsRawFd {
 /// pages for details.
 pub fn waitpid(pid: i32) -> Result<i32> {
     let mut status: c_int = 0;
-    match unsafe { raw_waitpid(pid as pid_t,
-                               &mut status as *mut c_int,
-                               0) } {
+    match unsafe { raw::waitpid(pid as pid_t,
+                                &mut status as *mut c_int,
+                                0) } {
         -1 => Err(Error::last_os_error()),
         _ => Ok(status as i32)
     }
@@ -83,8 +82,17 @@ pub fn waitpid(pid: i32) -> Result<i32> {
 /// be closed first. See `dup2(2)` in the UNIX manual
 /// pages for details.
 pub fn dup2<T: AsRawFd>(old: &T, new_fd: RawFd) -> Result<()> {
-    match unsafe { raw_dup2(old.as_raw_fd(), new_fd) } {
+    match unsafe { raw::dup2(old.as_raw_fd(), new_fd) } {
         -1 => Err(Error::last_os_error()),
+        _ => Ok(())
+    }
+}
+
+/// Close the underlying file descriptor of the given
+/// object. Subsequent accesses will fail.
+pub fn close<T: AsRawFd>(fd: &T) -> Result<()> {
+    match unsafe { raw::close(fd.as_raw_fd()) } {
+        -1 => { return Err(Error::last_os_error()) },
         _ => Ok(())
     }
 }

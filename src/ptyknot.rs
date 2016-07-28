@@ -101,13 +101,15 @@ impl Plumbing {
     /// that the slave end of the pipe is attached to the
     /// previously-supplied file descriptor.
     pub fn plumb_slave(&self) -> Result<()> {
+        try!(pty::close(&self.master));
         pty::dup2(&self.slave, self.fd)
     }
 
     /// Extract the master side of the pipe for use by
     /// the parent.
-    pub fn get_master(self) -> File {
-        self.master
+    pub fn get_master(self) -> Result<File> {
+        try!(pty::close(&self.slave));
+        Ok(self.master)
     }
 }
 
@@ -234,10 +236,7 @@ fn pipe_test() {
                   .expect("could not create pipeout");
     let knot = ptyknot(None, Some(&vec![&pipeout]), pipe_slave)
                .expect("ptyknot fail");
-    let pipeout = pipeout.get_master();
-    //let mut buf: Vec<u8> = Vec::new();
-    //let count = pipeout.read_to_end(&mut buf).expect("couldn't read");
-    //let message = std::str::from_utf8(&buf).expect("bad read string");
+    let pipeout = pipeout.get_master().expect("could not get master");
     let mut master = BufReader::new(pipeout);
     let mut message = String::new();
     master.read_line(&mut message)
