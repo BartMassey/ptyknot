@@ -37,7 +37,7 @@ macro_rules! try_cptr {
 }
 
 fn main() {
-    let mut pipefds : [libc::c_int; 2] = [0, 0];
+    let mut pipefds = [0; 2];
     check_cint!(libc::pipe((&mut pipefds).as_mut_ptr()));
     let pid: libc::pid_t =  try_cint!(libc::fork());
     if pid == 0 {
@@ -50,15 +50,15 @@ fn main() {
     check_cint!(libc::close(pipefds[1]));
     let r_mode = CString::new("r").unwrap().as_ptr();
     let child_stdout = try_cptr!(libc::fdopen(pipefds[0], r_mode));
-    let mut strbuf = [0u8;64];
+    let mut strbuf = [0;64];
     check_cptr!(libc::fgets(strbuf.as_mut_ptr() as *mut libc::c_char,
                             strbuf.len() as libc::c_int,
                             child_stdout));
-    print!("got {}", std::str::from_utf8(&strbuf).expect("bad string"));
     let mut wstatus = 0;
     check_cint!(libc::waitpid(pid, &mut wstatus as *mut libc::c_int, 0));
     let code = try_cint!(libc::WEXITSTATUS(wstatus));
     if code != 0 {
         panic!("child exited with status {}\n", code);
     }
+    print!("got {}", std::str::from_utf8(&strbuf).expect("bad string"));
 }
