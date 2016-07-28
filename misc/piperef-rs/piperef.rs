@@ -4,8 +4,9 @@
 
 extern crate libc;
 
-use std::ffi::CString;
-use std::io::Error;
+use std::fs::File;
+use std::io::{Error, BufReader, BufRead};
+use std::os::unix::io::FromRawFd;
 
 macro_rules! check_cint {
     ($cexp: expr) => (match unsafe { $cexp } {
@@ -48,17 +49,17 @@ fn main() {
         check_cint!(libc::exit(0));
     }
     check_cint!(libc::close(pipefds[1]));
-    let r_mode = CString::new("r").unwrap().as_ptr();
-    let child_stdout = try_cptr!(libc::fdopen(pipefds[0], r_mode));
-    let mut strbuf = [0;64];
-    check_cptr!(libc::fgets(strbuf.as_mut_ptr() as *mut libc::c_char,
-                            strbuf.len() as libc::c_int,
-                            child_stdout));
+    let child_stdout: File = unsafe { FromRawFd::from_raw_fd(pipefds[0]) };
+    let mut message = String::new();
+    let mut reader = BufReader::new(child_stdout);
+    reader.read_line(&mut message)
+          .expect("could not read message");
     let mut wstatus = 0;
     check_cint!(libc::waitpid(pid, &mut wstatus as *mut libc::c_int, 0));
     let code = try_cint!(libc::WEXITSTATUS(wstatus));
     if code != 0 {
         panic!("child exited with status {}\n", code);
     }
-    print!("got {}", std::str::from_utf8(&strbuf).expect("bad string"));
+    print!("got {}", message);
 }
+
