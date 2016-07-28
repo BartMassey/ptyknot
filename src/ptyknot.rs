@@ -18,7 +18,7 @@ extern crate pipefile;
 
 use std::fs::{OpenOptions, File};
 use std::io::{Result, Error};
-use std::os::unix::io::{RawFd, AsRawFd};
+use std::os::unix::io::RawFd;
 
 #[cfg(test)]
 use std::io::BufReader;
@@ -71,36 +71,43 @@ pub enum PipeDirection {
 
 /// Information needed during the pipe plumbing process.
 pub struct Plumbing {
-    direction: PipeDirection,
-    pipe: pipefile::PipeFile,
+    master: File,
+    slave: File,
     fd: RawFd
 }
 
-/// Create a new pipe running in the specified direction,
-/// and remember the file descriptor of the given file. This
-/// will later allow the slave to re-attach the fd to the
-/// other end of the pipe.
-pub fn make_pipe<T: AsRawFd>(direction: PipeDirection, slave_file: T)
-       -> Result<Plumbing> {
-    let pipe = try!(pipefile::pipe());
-    Ok(Plumbing {
-        direction: direction,
-        pipe: pipe,
-        fd: slave_file.as_raw_fd()
-    })
-}
-
 impl Plumbing {
+
+    /// Create a new pipe running in the specified direction,
+    /// and remember the file descriptor of the given file. This
+    /// will later allow the slave to re-attach the fd to the
+    /// other end of the pipe.
+    pub fn new(direction: PipeDirection, slave_file: RawFd)
+           -> Result<Plumbing> {
+        let pipe = try!(pipefile::pipe());
+        let (master, slave) =
+            match direction {
+                PipeDirection::MasterWrite => (pipe.write_end, pipe.read_end),
+                PipeDirection::MasterRead => (pipe.read_end, pipe.write_end),
+            };
+        Ok(Plumbing {
+            master: master,
+            slave: slave,
+            fd: slave_file
+        })
+    }
 
     /// Implement the slave side of the plumbing by ensuring
     /// that the slave end of the pipe is attached to the
     /// previously-supplied file descriptor.
     pub fn plumb_slave(&self) -> Result<()> {
-        let my_end = match self.direction {
-            PipeDirection::MasterRead => &self.pipe.write_end,
-            PipeDirection::MasterWrite => &self.pipe.read_end
-        };
-        pty::dup2(my_end, self.fd)
+        pty::dup2(&self.slave, self.fd)
+    }
+
+    /// Extract the master side of the pipe for use by
+    /// the parent.
+    pub fn get_master(self) -> File {
+        self.master
     }
 }
 
@@ -142,7 +149,10 @@ impl Plumbing {
 /// // This will wait for the child.
 /// drop(knot);
 /// ```
-pub fn ptyknot<F: Fn()>(pty: Option<&mut File>, action: F) -> Result<PtyKnot> {
+pub fn ptyknot<F: Fn()>(pty: Option<&mut File>,
+                        plumbing: Option<&Vec<&Plumbing>>,
+                        action: F)
+                        -> Result<PtyKnot> {
     let pid = unsafe{ libc::fork() };
     match pid {
         -1 => {
@@ -154,25 +164,34 @@ pub fn ptyknot<F: Fn()>(pty: Option<&mut File>, action: F) -> Result<PtyKnot> {
             // at "Getting a controlling tty" for helping
             // understand this mess.
 
-            // First, get rid of the current controlling terminal.
+            // Get rid of the current controlling terminal.
             if unsafe { libc::setsid() } == -1 {
                 panic!("setsid failed");
             }
 
-            // Now set a new controlling terminal if desired
-            // by opening a pty.
+            // Set a new controlling terminal if desired by
+            // opening a pty.
             if let Some(master) = pty {
                 let slave_name = pty::ptsname(master)
                                  .expect("cannot get pty name");
                 drop(master);
-                // Now, open the pty, which will set it
+                // Open the pty, which will set it
                 // as the controlling terminal.
                 let slave = OpenOptions::new()
                             .read(true).write(true)
                             .open(slave_name).expect("cannot open pty");
-                // We are done with the pty now and can close it.
+                // Close the pty, as we are done with it.
                 drop(slave);
             }
+
+            // Set up any requested plumbing.
+            if let Some(ps) = plumbing {
+                for p in ps {
+                    p.plumb_slave().expect("couldn't plumb pipe");
+                }
+            }
+
+            // Run the user action.
             action();
             std::process::exit(0)
         },
@@ -181,7 +200,7 @@ pub fn ptyknot<F: Fn()>(pty: Option<&mut File>, action: F) -> Result<PtyKnot> {
 }
 
 #[cfg(test)]
-fn slave() {
+fn pty_slave() {
     let mut tty = OpenOptions::new()
                   .write(true)
                   .open("/dev/tty")
@@ -192,13 +211,37 @@ fn slave() {
 }
 
 #[test]
-fn it_works() {
+fn pty_test() {
     let mut pty = make_pty();
-    let knot = ptyknot(Some(&mut pty), slave).expect("ptyknot fail");
+    let knot = ptyknot(Some(&mut pty), None, pty_slave)
+               .expect("ptyknot fail");
     let mut master = BufReader::new(&pty);
     let mut message = String::new();
     master.read_line(&mut message)
           .expect("could not read message");
-    assert!(message.trim() == "hello world");
     drop(knot);
+    assert_eq!(message.trim(), "hello world");
+}
+
+#[cfg(test)]
+fn pipe_slave() {
+    println!("hello world");
+}
+
+#[test]
+fn pipe_test() {
+    let pipeout = Plumbing::new(PipeDirection::MasterRead, 1)
+                  .expect("could not create pipeout");
+    let knot = ptyknot(None, Some(&vec![&pipeout]), pipe_slave)
+               .expect("ptyknot fail");
+    let pipeout = pipeout.get_master();
+    //let mut buf: Vec<u8> = Vec::new();
+    //let count = pipeout.read_to_end(&mut buf).expect("couldn't read");
+    //let message = std::str::from_utf8(&buf).expect("bad read string");
+    let mut master = BufReader::new(pipeout);
+    let mut message = String::new();
+    master.read_line(&mut message)
+          .expect("could not read message");
+    drop(knot);
+    assert_eq!(message.trim(), "hello world");
 }
