@@ -18,13 +18,17 @@ enum WriteMode {
 }
 
 fn go(write_mode: WriteMode) {
+    // Make a new pipe for child stdout.
     let mut pipefds = [0; 2];
     check_cint!(libc::pipe((&mut pipefds).as_mut_ptr()));
+    // Fork a child process.
     let pid: libc::pid_t =  try_cint!(libc::fork());
     if pid == 0 {
+        // Child: set up stdout.
         check_cint!(libc::close(pipefds[0]));
         check_cint!(libc::setsid());
         check_cint!(libc::dup2(pipefds[1], 1));
+        // Write "hello world" to stdout.
         match write_mode {
             WriteMode::Macro => {println!("hello world");},
             WriteMode::C => {
@@ -34,20 +38,25 @@ fn go(write_mode: WriteMode) {
                 check_cint!(libc::write(1, bufptr, buf.len()));
             }
         }
-        check_cint!(libc::exit(0));
+        // Explicitly exit.
+        std::process::exit(0);
     }
+    // Parent: Set up child pipe.
     check_cint!(libc::close(pipefds[1]));
     let child_stdout: File = unsafe { FromRawFd::from_raw_fd(pipefds[0]) };
+    // Read "hello world" from child pipe.
     let mut message = String::new();
     let mut reader = BufReader::new(child_stdout);
     reader.read_line(&mut message)
           .expect("could not read message");
+    // Clean up the child.
     let mut wstatus = 0;
     check_cint!(libc::waitpid(pid, &mut wstatus as *mut libc::c_int, 0));
     let code = try_cint!(libc::WEXITSTATUS(wstatus));
     if code != 0 {
         panic!("child exited with status {}\n", code);
     }
+    // Check to make sure the received message was correct.
     assert_eq!(message.trim(), "hello world");
 }
 
