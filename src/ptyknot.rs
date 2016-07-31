@@ -141,7 +141,7 @@ impl Plumbing {
 /// }
 /// 
 /// let mut pty = ptyknot::make_pty();
-/// let knot = ptyknot::ptyknot(Some(&mut pty), slave)
+/// let knot = ptyknot::ptyknot(Some(&mut pty), None, slave)
 ///            .expect("cannot create slave");
 /// let mut master = BufReader::new(&pty);
 /// let mut message = String::new();
@@ -226,12 +226,15 @@ fn pty_test() {
 
 #[cfg(test)]
 fn pipe_slave() {
-    println!("hello world");
+    // This needs to not be stdout for the test.
+    // See https://github.com/rust-lang/rust/issues/35136 .
+    writeln!(std::io::stderr(), "hello world")
+    .expect("couldn't write message");
 }
 
 #[test]
 fn pipe_test() {
-    let pipeout = Plumbing::new(PipeDirection::MasterRead, 1)
+    let pipeout = Plumbing::new(PipeDirection::MasterRead, 2)
                   .expect("could not create pipeout");
     let knot = ptyknot(None, Some(&vec![&pipeout]), pipe_slave)
                .expect("ptyknot fail");
