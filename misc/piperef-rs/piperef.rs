@@ -12,9 +12,9 @@ use std::os::unix::io::FromRawFd;
 mod cmacros;
 
 enum WriteMode {
-    #[allow(dead_code)]
     C,
-    Macro
+    Macro,
+    Stderr
 }
 
 fn go(write_mode: WriteMode) {
@@ -27,15 +27,23 @@ fn go(write_mode: WriteMode) {
         // Child: set up stdout.
         check_cint!(libc::close(pipefds[0]));
         check_cint!(libc::setsid());
-        check_cint!(libc::dup2(pipefds[1], 1));
         // Write "hello world" to stdout.
         match write_mode {
-            WriteMode::Macro => {println!("hello world");},
+            WriteMode::Macro => {
+                check_cint!(libc::dup2(pipefds[1], 1));
+                println!("hello world");
+            },
             WriteMode::C => {
+                check_cint!(libc::dup2(pipefds[1], 1));
                 let buf = "hello world".as_bytes();
                 let hello = std::ffi::CString::new(buf).unwrap();
                 let bufptr = hello.as_ptr() as *const libc::c_void;
                 check_cint!(libc::write(1, bufptr, buf.len()));
+            },
+            WriteMode::Stderr => {
+                check_cint!(libc::dup2(pipefds[1], 2));
+                writeln!(stderr(), "hello world")
+                .expect("couldn't write stderr");
             }
         }
         // Explicitly exit.
@@ -62,7 +70,9 @@ fn go(write_mode: WriteMode) {
 
 
 fn main() {
+    go(WriteMode::C);
     go(WriteMode::Macro);
+    go(WriteMode::Stderr);
 }
 
 #[test]
@@ -70,8 +80,12 @@ fn write_c_test() {
     go(WriteMode::C);
 }
 
+#[test]
+fn write_stderr_test() {
+    go(WriteMode::Stderr);
+}
 
 #[test]
 fn write_macro_test() {
-    main()
+    go(WriteMode::Macro);
 }
