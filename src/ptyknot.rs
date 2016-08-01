@@ -200,6 +200,40 @@ pub fn ptyknot<F: Fn()>(pty: Option<&mut File>,
     }
 }
 
+macro_rules! optional_arg {
+    ($(args:expr),*) =>
+        (match ($($args),*) {
+            () => None,
+            (some) => Some(some),
+            _ => panic!("internal error: arg used twice")
+        })
+}
+
+/// Provide a cleaner interface to `ptyknot`() *et al* by doing
+/// the variable declaration and redeclaration.
+#[macro_export]
+macro_rules! ptyknot {
+    ($slave:expr,
+     (@ $tty:ident),*
+     ($master_read:ident < $read_fd:expr),*
+     ($master_write:ident > $write_fd:expr),*) =>
+        ($(let $tty = $crate::make_tty();)*
+         $(let $master_read =
+           $crate::Plumbing::new(PipeDirection::MasterRead,$read_fd)
+           .expect("$master_read: create failed");)*
+         $(let $master_write =
+           $crate::Plumbing::new(PipeDirection::MasterWrite,$write_fd)
+           .expect("$master_write: create failed");)*
+         $crate::ptyknot($slave, optional_arg!($($tty),*),
+                         vec![$($master_read),*,$($master_write),*]);
+         $(let $master_read =
+           $master_read.get_master()
+           .expect("$master_read: get master failed");)*
+         $(let $master_write =
+           $master_write.get_master()
+           .expect("$master_write: get master failed");)*)
+}
+
 #[cfg(test)]
 fn pty_slave() {
     let mut tty = OpenOptions::new()
