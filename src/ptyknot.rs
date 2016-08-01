@@ -141,7 +141,7 @@ impl Plumbing {
 /// }
 /// 
 /// let mut pty = ptyknot::make_pty();
-/// let knot = ptyknot::ptyknot(Some(&mut pty), None, slave)
+/// let knot = ptyknot::ptyknot(slave, Some(&mut pty), &vec![])
 ///            .expect("cannot create slave");
 /// let mut master = BufReader::new(&pty);
 /// let mut message = String::new();
@@ -150,9 +150,9 @@ impl Plumbing {
 /// // This will wait for the child.
 /// drop(knot);
 /// ```
-pub fn ptyknot<F: Fn()>(pty: Option<&mut File>,
-                        plumbing: Option<&Vec<&Plumbing>>,
-                        action: F)
+pub fn ptyknot<F: Fn()>(action: F,
+                        pty: Option<&mut File>,
+                        plumbing: &Vec<&Plumbing>)
                         -> Result<PtyKnot> {
     let pid = unsafe{ libc::fork() };
     match pid {
@@ -186,10 +186,8 @@ pub fn ptyknot<F: Fn()>(pty: Option<&mut File>,
             }
 
             // Set up any requested plumbing.
-            if let Some(ps) = plumbing {
-                for p in ps {
-                    p.plumb_slave().expect("couldn't plumb pipe");
-                }
+            for p in plumbing {
+                p.plumb_slave().expect("couldn't plumb pipe");
             }
 
             // Run the user action.
@@ -217,19 +215,19 @@ macro_rules! ptyknot {
      (@ $tty:ident),*
      ($master_read:ident < $read_fd:expr),*
      ($master_write:ident > $write_fd:expr),*) =>
-        ($(let $tty = $crate::make_tty();)*
-         $(let $master_read =
+        ($(let mut $tty = $crate::make_tty();)*
+         $(let mut $master_read =
            $crate::Plumbing::new(PipeDirection::MasterRead,$read_fd)
            .expect("$master_read: create failed");)*
-         $(let $master_write =
+         $(let mut $master_write =
            $crate::Plumbing::new(PipeDirection::MasterWrite,$write_fd)
            .expect("$master_write: create failed");)*
          $crate::ptyknot($slave, optional_arg!($($tty),*),
-                         vec![$($master_read),*,$($master_write),*]);
-         $(let $master_read =
+                         &vec![$(&$master_read),*,$(&$master_write),*]);
+         $(let mut $master_read =
            $master_read.get_master()
            .expect("$master_read: get master failed");)*
-         $(let $master_write =
+         $(let mut $master_write =
            $master_write.get_master()
            .expect("$master_write: get master failed");)*)
 }
@@ -248,7 +246,7 @@ fn pty_slave() {
 #[test]
 fn pty_test() {
     let mut pty = make_pty();
-    let knot = ptyknot(Some(&mut pty), None, pty_slave)
+    let knot = ptyknot(pty_slave, Some(&mut pty), &vec![])
                .expect("ptyknot fail");
     let mut master = BufReader::new(&pty);
     let mut message = String::new();
@@ -270,7 +268,7 @@ fn pipe_slave() {
 fn pipe_test() {
     let pipeout = Plumbing::new(PipeDirection::MasterRead, 2)
                   .expect("could not create pipeout");
-    let knot = ptyknot(None, Some(&vec![&pipeout]), pipe_slave)
+    let knot = ptyknot(pipe_slave, None, &vec![&pipeout])
                .expect("ptyknot fail");
     let pipeout = pipeout.get_master().expect("could not get master");
     let mut master = BufReader::new(pipeout);
