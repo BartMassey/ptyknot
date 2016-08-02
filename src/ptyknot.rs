@@ -11,8 +11,6 @@
 //! along with the process ID of the child. The caller can
 //! then later wait for the child to exit.
 
-#![warn(missing_docs)]
-
 extern crate libc;
 
 use std::fs::{OpenOptions, File};
@@ -33,6 +31,7 @@ pub struct PtyKnot {
 }
 
 impl Drop for PtyKnot {
+    /// When the `PtyKnot` is dropped, its child process is waited for.
     fn drop(&mut self) {
         let status = pty::waitpid(self.pid).expect("could not reap child");
         assert_eq!(status, 0);
@@ -198,38 +197,66 @@ pub fn ptyknot<F: Fn()>(action: F,
     }
 }
 
-macro_rules! optional_arg {
-    ($(args:expr),*) =>
-        (match ($($args),*) {
-            () => None,
-            (some) => Some(some),
-            _ => panic!("internal error: arg used twice")
-        })
-}
-
-/// Provide a cleaner interface to `ptyknot`() *et al* by doing
-/// the variable declaration and redeclaration.
+/// Provide a cleaner interface to `ptyknot()` *et al* by
+/// doing the variable declaration and redeclaration.  The
+/// first argument is the identifier for the resulting knot.
+/// The second argument is the child action, as with
+/// `ptyknot()`. The rest of the arguments are:
+///
+/// * `@`, followed by optional pseudo-tty identifier.
+/// * Zero or more master read redirections, consisting of
+///   `<`, followed by a master read identifier, followed by a
+///   child file descriptor number.
+/// * Zero or more master write redirections, consisting of
+///   `>`, followed by a master write identifier, followed by
+///   a child file descriptor number.
+/// 
+/// #Example
+/// 
+/// ```
+/// ```
 #[macro_export]
 macro_rules! ptyknot {
-    ($slave:expr,
-     (@ $tty:ident),*
-     ($master_read:ident < $read_fd:expr),*
-     ($master_write:ident > $write_fd:expr),*) =>
-        ($(let mut $tty = $crate::make_tty();)*
+    ($knot:expr,
+     $slave:expr,
+     $tty:ident ;
+     $($master_read:ident $read_fd:expr),* ;
+     $($master_write:ident $write_fd:expr),* ) =>
+        (let mut $tty = $crate::make_tty();
          $(let mut $master_read =
            $crate::Plumbing::new(PipeDirection::MasterRead,$read_fd)
            .expect("$master_read: create failed");)*
          $(let mut $master_write =
            $crate::Plumbing::new(PipeDirection::MasterWrite,$write_fd)
            .expect("$master_write: create failed");)*
-         $crate::ptyknot($slave, optional_arg!($($tty),*),
-                         &vec![$(&$master_read),*,$(&$master_write),*]);
+         let $knot =
+             $crate::ptyknot($slave, Some($tty),
+                             &vec![$(&$master_read),*,$(&$master_write),*]);
          $(let mut $master_read =
            $master_read.get_master()
            .expect("$master_read: get master failed");)*
          $(let mut $master_write =
            $master_write.get_master()
-           .expect("$master_write: get master failed");)*)
+           .expect("$master_write: get master failed");)*);
+    ($knot:expr,
+     $slave:expr ;
+     $($master_read:ident $read_fd:expr),* ;
+     $($master_write:ident $write_fd:expr),*) =>
+        ($(let mut $master_read =
+           $crate::Plumbing::new(PipeDirection::MasterRead,$read_fd)
+           .expect("$master_read: create failed");)*
+         $(let mut $master_write =
+           $crate::Plumbing::new(PipeDirection::MasterWrite,$write_fd)
+           .expect("$master_write: create failed");)*
+         let $knot =
+             $crate::ptyknot($slave, None,
+                             &vec![$(&$master_read),*,$(&$master_write),*]);
+         $(let mut $master_read =
+           $master_read.get_master()
+           .expect("$master_read: get master failed");)*
+         $(let mut $master_write =
+           $master_write.get_master()
+           .expect("$master_write: get master failed");)*);
 }
 
 #[cfg(test)]
@@ -277,4 +304,34 @@ fn pipe_test() {
           .expect("could not read message");
     drop(knot);
     assert_eq!(message.trim(), "hello world");
+}
+
+
+#[cfg(test)]
+fn macro_slave() {
+    let mut tty = OpenOptions::new()
+                  .write(true)
+                  .open("/dev/tty")
+                  .expect("could not open /dev/tty");
+    tty.write("hello world\n".as_bytes())
+       .expect("could not write /dev/tty");
+    tty.flush().expect("cannot flush /dev/tty");
+    let mut input = BufReader::new(stdin());
+    let mut message = String::new();
+    input.read_line(&mut message)
+         .expect("could not read stdin");
+}
+
+#[test]
+pub fn macro_test() {
+    ptyknot!(knot, macro_slave, mut_pty ;; child_stdin 0)
+        .expect("cannot create slave");
+    let mut tty = BufReader::new(&pty);
+    let mut message = String::new();
+    master.read_line(&mut message)
+          .expect("could not read tty");
+    writeln!(child_stdin, "hello world\n")
+          .expect("could not write stdin");
+    // This will wait for the child.
+    drop(knot);
 }
