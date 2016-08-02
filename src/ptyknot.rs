@@ -235,11 +235,7 @@ macro_rules! ptyknot {
                                 0 => None,
                                 _ => Some(&mut $($tty)*),
                             },
-                            &{
-                                let mut readers: Vec<&Plumbing> = vec![$(&$master_read),*];
-                                let writers: Vec<&Plumbing> = vec![$(&$master_write),*];
-                                readers.extend_from_slice(&writers);
-                                readers})
+                            &vec![$(&$master_read,)* $(&$master_write,)*])
             .expect("ptyknot failed");
         $(let mut $master_read =
           $master_read.get_master()
