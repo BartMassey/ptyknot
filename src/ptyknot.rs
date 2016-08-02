@@ -18,7 +18,7 @@ use std::io::{Result, Error};
 use std::os::unix::io::RawFd;
 
 #[cfg(test)]
-use std::io::BufReader;
+use std::io::{BufReader, stdin};
 #[cfg(test)]
 use std::io::prelude::*;
 
@@ -205,11 +205,11 @@ pub fn ptyknot<F: Fn()>(action: F,
 ///
 /// * `@`, followed by optional pseudo-tty identifier.
 /// * Zero or more master read redirections, consisting of
-///   `<`, followed by a master read identifier, followed by a
-///   child file descriptor number.
+///   `<`, followed by a master read identifier, followed by
+///   a parenthesized integer file descriptor expression.
 /// * Zero or more master write redirections, consisting of
 ///   `>`, followed by a master write identifier, followed by
-///   a child file descriptor number.
+///   a parenthesized integer file descriptor expression.
 /// 
 /// #Example
 /// 
@@ -217,46 +217,37 @@ pub fn ptyknot<F: Fn()>(action: F,
 /// ```
 #[macro_export]
 macro_rules! ptyknot {
-    ($knot:expr,
-     $slave:expr,
-     $tty:ident ;
-     $($master_read:ident $read_fd:expr),* ;
-     $($master_write:ident $write_fd:expr),* ) =>
-        (let mut $tty = $crate::make_tty();
-         $(let mut $master_read =
-           $crate::Plumbing::new(PipeDirection::MasterRead,$read_fd)
-           .expect("$master_read: create failed");)*
-         $(let mut $master_write =
-           $crate::Plumbing::new(PipeDirection::MasterWrite,$write_fd)
-           .expect("$master_write: create failed");)*
-         let $knot =
-             $crate::ptyknot($slave, Some($tty),
-                             &vec![$(&$master_read),*,$(&$master_write),*]);
-         $(let mut $master_read =
-           $master_read.get_master()
-           .expect("$master_read: get master failed");)*
-         $(let mut $master_write =
-           $master_write.get_master()
-           .expect("$master_write: get master failed");)*);
-    ($knot:expr,
-     $slave:expr ;
-     $($master_read:ident $read_fd:expr),* ;
-     $($master_write:ident $write_fd:expr),*) =>
-        ($(let mut $master_read =
-           $crate::Plumbing::new(PipeDirection::MasterRead,$read_fd)
-           .expect("$master_read: create failed");)*
-         $(let mut $master_write =
-           $crate::Plumbing::new(PipeDirection::MasterWrite,$write_fd)
-           .expect("$master_write: create failed");)*
-         let $knot =
-             $crate::ptyknot($slave, None,
-                             &vec![$(&$master_read),*,$(&$master_write),*]);
-         $(let mut $master_read =
-           $master_read.get_master()
-           .expect("$master_read: get master failed");)*
-         $(let mut $master_write =
-           $master_write.get_master()
-           .expect("$master_write: get master failed");)*);
+    ($knot:ident,
+     $slave:expr
+     $(, @ $tty:ident)*
+     $(, < $master_read:ident $read_fd:expr)*
+     $(, > $master_write:ident $write_fd:expr)*) => {
+        $(let mut $tty = $crate::make_pty();)*
+        $(let $master_read =
+          $crate::Plumbing::new(PipeDirection::MasterRead,$read_fd)
+          .expect("$master_read: create failed");)*
+        $(let $master_write =
+          $crate::Plumbing::new(PipeDirection::MasterWrite,$write_fd)
+          .expect("$master_write: create failed");)*
+        let $knot =
+            $crate::ptyknot($slave,
+                            match [$(&$tty),*].len() {
+                                0 => None,
+                                _ => Some(&mut $($tty)*),
+                            },
+                            &{
+                                let mut readers: Vec<&Plumbing> = vec![$(&$master_read),*];
+                                let writers: Vec<&Plumbing> = vec![$(&$master_write),*];
+                                readers.extend_from_slice(&writers);
+                                readers})
+            .expect("ptyknot failed");
+        $(let mut $master_read =
+          $master_read.get_master()
+          .expect("$master_read: get master failed");)*
+        $(let mut $master_write =
+          $master_write.get_master()
+          .expect("$master_write: get master failed");)*
+    }
 }
 
 #[cfg(test)]
@@ -324,11 +315,10 @@ fn macro_slave() {
 
 #[test]
 pub fn macro_test() {
-    ptyknot!(knot, macro_slave, mut_pty ;; child_stdin 0)
-        .expect("cannot create slave");
-    let mut tty = BufReader::new(&pty);
+    ptyknot!(knot, macro_slave, @ child_pty, > child_stdin 0);
+    let mut tty = BufReader::new(&child_pty);
     let mut message = String::new();
-    master.read_line(&mut message)
+    tty.read_line(&mut message)
           .expect("could not read tty");
     writeln!(child_stdin, "hello world\n")
           .expect("could not write stdin");
