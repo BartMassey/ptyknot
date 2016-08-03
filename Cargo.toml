@@ -3,7 +3,7 @@ name = "ptyknot"
 version = "0.1.0"
 authors = ["Bart Massey <bart.massey@gmail.com>"]
 publish = false
-description = "Run a specified action as a new process with controlling pty."
+description = "Run a specified action as a controlled forked process."
 repository = "http://gitlab.com/BartMassey/ptyknot"
 readme = "README.md"
 keywords = ["pty", "pseudotty", "process"]
@@ -15,4 +15,3 @@ path = "src/ptyknot.rs"
 
 [dependencies]
 libc = "0.2.0"
-pipefile = "0.1.1"
