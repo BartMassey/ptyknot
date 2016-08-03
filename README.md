@@ -1,7 +1,7 @@
-# ptyknot
+# ptyknot: create a child process running a Rust action
 Copyright (c) 2016 Bart Massey
 
-This Rust library provides support for creating a child
+This Rust "crate" provides support for creating a child
 process running a specified action, optionally with a new
 pseudo-tty as its controlling terminal and with parent pipes
 for some of its initial file descriptors. The caller gets
@@ -9,6 +9,12 @@ the master side of the pseudo-tty and pipes for
 manipulation, along with the process ID of the child. The
 caller can then later wait for the child to exit and examine
 its exit status.
+
+# Documentation
+
+The
+[rustdoc](https://bartmassey.github.io/ptyknot/target/doc/ptyknot/index.html)
+is the primary documentation for this crate.
 
 # Issues
 
