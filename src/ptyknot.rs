@@ -5,11 +5,13 @@
 
 //! Child process and pty support.
 //!
-//! Start a child process running a specified action, with
-//! a new pseudo-tty as its controlling terminal. Give the
-//! caller the master side of that terminal for manipulation,
-//! along with the process ID of the child. The caller can
-//! then later wait for the child to exit.
+//! Start a child process running a specified action. The
+//! process may have a new pseudo-tty as its controlling
+//! terminal, and may have pipes to the master for some of
+//! its file descriptors.  The caller receives handles for
+//! all of this, along with the process ID of the child. The
+//! caller can then later wait for the child to exit by
+//! dropping its last reference.
 
 extern crate libc;
 
@@ -58,8 +60,7 @@ pub fn make_pty() -> File {
     master
 }
 
-/// Which direction (from the master's point of view)
-/// a pipe runs.
+/// Which direction a pipe runs.
 pub enum PipeDirection {
     /// Master reads from pipe, slave writes.
     MasterRead,
@@ -76,10 +77,10 @@ pub struct Plumbing {
 
 impl Plumbing {
 
-    /// Create a new pipe running in the specified direction,
-    /// and remember the file descriptor of the given file. This
-    /// will later allow the slave to attach `slave_target` to the
-    /// other end of the pipe.
+    /// Create a new pipe running in the specified
+    /// direction, and remember the file descriptor of the
+    /// given file. This will later allow the slave to
+    /// attach `slave_target` to the other end of the pipe.
     pub fn new(direction: PipeDirection, slave_target: RawFd)
            -> Result<Plumbing> {
         let pipefds = try!(pty::pipe());
@@ -116,7 +117,7 @@ impl Plumbing {
 /// just a process ID). When the the structure's destructor
 /// is called, it will wait to reap the child process and
 /// panic if it has crashed or exited with non-zero status.
-/// 
+///
 /// The optional `pty` argument, if supplied with the master
 /// side of a pseudoterminal as created by `make_pty()`, will
 /// cause the child to be set up with the slave side of that
@@ -138,14 +139,14 @@ impl Plumbing {
 ///        .expect("cannot write to /dev/tty");
 ///     tty.flush().expect("cannot flush /dev/tty");
 /// }
-/// 
+///
 /// let mut pty = ptyknot::make_pty();
 /// let knot = ptyknot::ptyknot(slave, Some(&mut pty), &vec![])
 ///            .expect("cannot create slave");
-/// let mut master = BufReader::new(&pty);
+/// let mut tty = BufReader::new(&pty);
 /// let mut message = String::new();
-/// master.read_line(&mut message)
-///       .expect("could not read message");
+/// tty.read_line(&mut message)
+///    .expect("could not read message");
 /// // This will wait for the child.
 /// drop(knot);
 /// ```
@@ -198,22 +199,52 @@ pub fn ptyknot<F: Fn()>(action: F,
 }
 
 /// Provide a cleaner interface to `ptyknot()` *et al* by
-/// doing the variable declaration and redeclaration.  The
+/// doing variable declaration and redeclaration.  The
 /// first argument is the identifier for the resulting knot.
 /// The second argument is the child action, as with
 /// `ptyknot()`. The rest of the arguments are:
 ///
-/// * `@`, followed by optional pseudo-tty identifier.
+/// * Zero or one pty redirections, consisting of `@`
+///   followed by a pseudo-tty identifier.
 /// * Zero or more master read redirections, consisting of
-///   `<`, followed by a master read identifier, followed by
-///   a parenthesized integer file descriptor expression.
+///   `<` followed by a master read identifier and
+///   an integer file descriptor expression.
 /// * Zero or more master write redirections, consisting of
-///   `>`, followed by a master write identifier, followed by
-///   a parenthesized integer file descriptor expression.
-/// 
+///   `>` followed by a master write identifier and
+///   an integer file descriptor expression.
+///
+/// The macro will `let`-declare the necessary handles,
+/// assemble them and pass them to `ptyknot()`, then
+/// redeclare the handles to allow the master to manipulate
+/// them.
+///
 /// #Example
-/// 
+///
 /// ```
+/// # #[macro_use]
+/// # extern crate ptyknot;
+/// use std::fs::OpenOptions;
+/// use std::io::{Write, BufRead, BufReader};
+///
+/// fn slave() {
+///     let mut tty = OpenOptions::new()
+///                   .write(true)
+///                   .open("/dev/tty")
+///                   .expect("cannot open /dev/tty");
+///     tty.write("hello world\n".as_bytes())
+///        .expect("cannot write to /dev/tty");
+///     tty.flush().expect("cannot flush /dev/tty");
+/// }
+///
+/// # pub fn main() {
+/// ptyknot!(knot, slave, @ pty);
+/// let mut tty = BufReader::new(&pty);
+/// let mut message = String::new();
+/// tty.read_line(&mut message)
+///    .expect("could not read message");
+/// // This will wait for the child.
+/// drop(knot);
+/// # }
 /// ```
 #[macro_export]
 macro_rules! ptyknot {
