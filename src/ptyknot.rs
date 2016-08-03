@@ -231,7 +231,7 @@ macro_rules! ptyknot {
           .expect("$master_write: create failed");)*
         let $knot =
             $crate::ptyknot($slave,
-                            match [$(&$tty),*].len() {
+                            match [$(&$tty)*].len() {
                                 0 => None,
                                 _ => Some(&mut $($tty)*),
                             },
