@@ -35,8 +35,7 @@ pub struct PtyKnot {
 impl Drop for PtyKnot {
     /// When the `PtyKnot` is dropped, its child process is waited for.
     fn drop(&mut self) {
-        let status = pty::waitpid(self.pid).expect("could not reap child");
-        assert_eq!(status, 0);
+        let _ = pty::waitpid(self.pid);
     }
 }
 
@@ -45,19 +44,19 @@ impl Drop for PtyKnot {
 /// # Example
 ///
 /// ```
-/// let mut master = ptyknot::make_pty();
+/// let mut master = ptyknot::make_pty().expect("could not make pty");
 /// let slave_name = ptyknot::pty::ptsname(&mut master)
-///                  .expect("couldn't get slave name");
+///                  .expect("could not get slave name");
 /// println!("{}", slave_name.to_str()
-///                .expect("couldn't convert slave name"));
+///                .expect("could not convert slave name"));
 /// ```
-pub fn make_pty() -> File {
-    let mut master = OpenOptions::new()
-                 .read(true).write(true)
-                 .open("/dev/ptmx").expect("cannot open ptmx");
-    pty::grantpt(&mut master).expect("could not grant pty");
-    pty::unlockpt(&mut master).expect("could not unlock pty");
-    master
+pub fn make_pty() -> Result<File> {
+    let mut master = try!(OpenOptions::new()
+                          .read(true).write(true)
+                          .open("/dev/ptmx"));
+    try!(pty::grantpt(&mut master));
+    try!(pty::unlockpt(&mut master));
+    Ok(master)
 }
 
 /// Which direction a pipe runs.
@@ -140,7 +139,7 @@ impl Plumbing {
 ///     tty.flush().expect("cannot flush /dev/tty");
 /// }
 ///
-/// let mut pty = ptyknot::make_pty();
+/// let mut pty = ptyknot::make_pty().expect("could not make pty");
 /// let knot = ptyknot::ptyknot(slave, Some(&mut pty), &vec![])
 ///            .expect("cannot create slave");
 /// let mut tty = BufReader::new(&pty);
@@ -156,10 +155,12 @@ pub fn ptyknot<F: Fn()>(action: F,
                         -> Result<PtyKnot> {
     let pid = unsafe{ libc::fork() };
     match pid {
-        -1 => {
-            panic!("fork failed: {}", Error::last_os_error());
-        },
+        -1 => Err(Error::last_os_error()),
         0 => {
+            // In the child process, there's no opportunity
+            // to return an error, so we'll just panic if
+            // there's a problem.
+
             // Thanks much to
             // https://www.win.tue.nl/~aeb/linux/lk/lk-10.html
             // at "Getting a controlling tty" for helping
@@ -167,7 +168,7 @@ pub fn ptyknot<F: Fn()>(action: F,
 
             // Get rid of the current controlling terminal.
             if unsafe { libc::setsid() } == -1 {
-                panic!("setsid failed");
+                panic!(Error::last_os_error());
             }
 
             // Set a new controlling terminal if desired by
@@ -187,7 +188,7 @@ pub fn ptyknot<F: Fn()>(action: F,
 
             // Set up any requested plumbing.
             for p in plumbing {
-                p.plumb_slave().expect("couldn't plumb pipe");
+                p.plumb_slave().expect("could not plumb pipe");
             }
 
             // Run the user action.
@@ -253,7 +254,7 @@ macro_rules! ptyknot {
      $(, @ $tty:ident)*
      $(, < $master_read:ident $read_fd:expr)*
      $(, > $master_write:ident $write_fd:expr)*) => {
-        $(let mut $tty = $crate::make_pty();)*
+        $(let mut $tty = $crate::make_pty().expect("could not make pty");)*
         $(let $master_read =
           $crate::Plumbing::new(PipeDirection::MasterRead,$read_fd)
           .expect("$master_read: create failed");)*
@@ -290,7 +291,7 @@ fn pty_slave() {
 
 #[test]
 fn pty_test() {
-    let mut pty = make_pty();
+    let mut pty = make_pty().expect("could not make pty");
     let knot = ptyknot(pty_slave, Some(&mut pty), &vec![])
                .expect("ptyknot fail");
     let mut master = BufReader::new(&pty);
@@ -306,7 +307,7 @@ fn pipe_slave() {
     // This needs to not be stdout for the test.
     // See https://github.com/rust-lang/rust/issues/35136 .
     writeln!(std::io::stderr(), "hello world")
-    .expect("couldn't write message");
+    .expect("could not write message");
 }
 
 #[test]
