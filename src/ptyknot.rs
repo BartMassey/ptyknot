@@ -256,7 +256,7 @@ macro_rules! ptyknot {
      $(, > $master_write:ident $write_fd:expr)*) => {
         $(let mut $tty = $crate::make_pty().expect("could not make pty");)*
         $(let $master_read =
-          $crate::Plumbing::new(PipeDirection::MasterRead,$read_fd)
+          $crate::Plumbing::new($crate::PipeDirection::MasterRead,$read_fd)
           .expect("$master_read: create failed");)*
         $(let $master_write =
           $crate::Plumbing::new(PipeDirection::MasterWrite,$write_fd)
