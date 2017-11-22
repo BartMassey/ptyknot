@@ -173,17 +173,20 @@ pub fn ptyknot<F: Fn()>(action: F,
 
             // Set a new controlling terminal if desired by
             // opening a pty.
+            let mut slave = None;
             if let Some(master) = pty {
                 let slave_name = pty::ptsname(master)
                                  .expect("cannot get pty name");
                 drop(master);
                 // Open the pty, which will set it
                 // as the controlling terminal.
-                let slave = OpenOptions::new()
-                            .read(true).write(true)
-                            .open(slave_name).expect("cannot open pty");
-                // Close the pty, as we are done with it.
-                drop(slave);
+                let slave_fd = OpenOptions::new()
+                    .read(true).write(true)
+                    .open(slave_name).expect("cannot open pty");
+                // Need to leave the slave pty open in case
+                // the slave is going to open it, to avoid
+                // a race.
+                slave = Some(slave_fd);
             }
 
             // Set up any requested plumbing.
@@ -193,6 +196,11 @@ pub fn ptyknot<F: Fn()>(action: F,
 
             // Run the user action.
             action();
+
+            if let Some(slave_fd) = slave {
+                drop(slave_fd);
+            };
+
             std::process::exit(0)
         },
         _ => Ok(PtyKnot{pid: pid})

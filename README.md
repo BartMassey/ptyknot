@@ -33,7 +33,7 @@ is the primary documentation for this crate.
   * There is a comment in the Rust library source that
     indicates that this code will have memory-related
     crashes on some UNIX systems, probably because of broken
-    `fork` or thread implementations.
+    `fork` or thread implementations. I haven't seen this.
 
 * This code needs careful review. It's probably full of all
   kinds of badness.
@@ -42,6 +42,9 @@ is the primary documentation for this crate.
 
 This code does not build with rustc 1.8 because of compiler
 and library bugs.
+
+The `misc` subdirectory contains some stale prototyping
+code. It arguably should be removed.
 
 # Credits
 
