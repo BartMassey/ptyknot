@@ -1,6 +1,6 @@
 [package]
 name = "ptyknot"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Bart Massey <bart.massey@gmail.com>"]
 description = "Run a specified action as a controlled forked process."
 repository = "http://github.com/BartMassey/ptyknot"
