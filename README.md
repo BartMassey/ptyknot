@@ -13,7 +13,7 @@ its exit status.
 # Documentation
 
 The
-[rustdoc](https://bartmassey.github.io/ptyknot/target/doc/ptyknot/index.html)
+[rustdoc](https://bartmassey.github.io/ptyknot/ptyknot)
 is the primary documentation for this crate.
 
 # Issues
