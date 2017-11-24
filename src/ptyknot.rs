@@ -276,7 +276,7 @@ macro_rules! ptyknot {
                             },
                             &vec![$(&$master_read,)* $(&$master_write,)*])
             .expect("ptyknot failed");
-        $(let mut $master_read =
+        $(let $master_read =
           $master_read.get_master()
           .expect("$master_read: get master failed");)*
         $(let mut $master_write =
