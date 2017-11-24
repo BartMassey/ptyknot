@@ -197,9 +197,8 @@ pub fn ptyknot<F: Fn()>(action: F,
             // Run the user action.
             action();
 
-            if let Some(slave_fd) = slave {
-                drop(slave_fd);
-            };
+            // The slave side is no longer needed.
+            drop(slave);
 
             std::process::exit(0)
         },
