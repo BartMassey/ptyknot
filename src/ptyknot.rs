@@ -51,11 +51,11 @@ impl Drop for PtyKnot {
 ///                .expect("could not convert slave name"));
 /// ```
 pub fn make_pty() -> Result<File> {
-    let mut master = try!(OpenOptions::new()
-                          .read(true).write(true)
-                          .open("/dev/ptmx"));
-    try!(pty::grantpt(&mut master));
-    try!(pty::unlockpt(&mut master));
+    let mut master = OpenOptions::new()
+        .read(true).write(true)
+        .open("/dev/ptmx")?;
+    pty::grantpt(&mut master)?;
+    pty::unlockpt(&mut master)?;
     Ok(master)
 }
 
@@ -82,7 +82,7 @@ impl Plumbing {
     /// attach `slave_target` to the other end of the pipe.
     pub fn new(direction: PipeDirection, slave_target: RawFd)
            -> Result<Plumbing> {
-        let pipefds = try!(pty::pipe());
+        let pipefds = pty::pipe()?;
         let (master, slave) =
             match direction {
                 PipeDirection::MasterWrite => (pipefds[1], pipefds[0]),
@@ -99,14 +99,14 @@ impl Plumbing {
     /// that the slave end of the pipe is attached to the
     /// previously-supplied file descriptor.
     pub fn plumb_slave(&self) -> Result<()> {
-        try!(pty::close(self.master));
+        pty::close(self.master)?;
         pty::dup2(self.slave, self.slave_target)
     }
 
     /// Extract the master side of the pipe for use by
     /// the parent.
     pub fn get_master(self) -> Result<File> {
-        try!(pty::close(self.slave));
+        pty::close(self.slave)?;
         Ok(pty::from_raw_fd(self.master))
     }
 }
