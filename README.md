@@ -1,4 +1,4 @@
-# ptyknot: create a child process running a Rust action
+# ptyknot: Run a Rust action in a child process on a virtual terminal
 Copyright (c) 2016 Bart Massey
 
 This Rust "crate" provides support for creating a child
@@ -18,8 +18,6 @@ is the primary documentation for this crate.
 
 # Issues
 
-* The name "ptyknot" is stupid.
-
 * This library is quite Linux-specific.
 
   * It currently requires a Unix-98 `ptmx` pseudo-tty implementation:
@@ -30,21 +28,8 @@ is the primary documentation for this crate.
     tty open. The BSD-style `ioctl` to set a controlling
     terminal is not yet supported.
 
-  * There is a comment in the Rust library source that
-    indicates that this code will have memory-related
-    crashes on some UNIX systems, probably because of broken
-    `fork` or thread implementations. I haven't seen this.
-
 * This code needs careful review. It's probably full of all
   kinds of badness.
-
-# Notes
-
-This code does not build with rustc 1.8 because of compiler
-and library bugs.
-
-The `misc` subdirectory contains some stale prototyping
-code. It arguably should be removed.
 
 # Credits
 
@@ -57,8 +42,7 @@ different functionality.
 Specifically, I wrote this library to allow rewriting the
 `it_works` test in my reworked version of
 [rustastic-password](http://github.com/conradkleinespel/rustastic-password).
-Hopefully I can either get my work pushed upstream there or
-get a fork published soon.
+`rustastic-password` has long since moved on, so…
 
 Many sources of information were used in coding this. They
 are listed in the source code.
