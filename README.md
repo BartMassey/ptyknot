@@ -50,4 +50,4 @@ are listed in the source code.
 # License
 
 This work is made available under the "MIT License".  Please
-see the file COPYING in this distribution for license terms.
+see the file LICENSE in this distribution for license terms.
