@@ -13,8 +13,6 @@
 //! caller can then later wait for the child to exit by
 //! dropping its last reference.
 
-extern crate libc;
-
 use std::fs::{OpenOptions, File};
 use std::io::{Result, Error};
 use std::os::unix::io::RawFd;
@@ -151,7 +149,7 @@ impl Plumbing {
 /// ```
 pub fn ptyknot<F: Fn()>(action: F,
                         pty: Option<&mut File>,
-                        plumbing: &Vec<&Plumbing>)
+                        plumbing: &[&Plumbing])
                         -> Result<PtyKnot> {
     let pid = unsafe{ libc::fork() };
     match pid {
@@ -229,8 +227,7 @@ pub fn ptyknot<F: Fn()>(action: F,
 /// #Example
 ///
 /// ```
-/// # #[macro_use]
-/// # extern crate ptyknot;
+/// # use ptyknot::*;
 /// use std::fs::OpenOptions;
 /// use std::io::{Write, BufRead, BufReader};
 ///
