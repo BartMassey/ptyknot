@@ -41,8 +41,8 @@ different functionality.
 
 Specifically, I wrote this library to allow rewriting the
 `it_works` test in my reworked version of
-[rustastic-password](http://github.com/conradkleinespel/rustastic-password).
-`rustastic-password` has long since moved on, so…
+[rpassword](http://github.com/conradkleinespel/rpassword).
+`rpassword` has long since moved on, so…
 
 Many sources of information were used in coding this. They
 are listed in the source code.
