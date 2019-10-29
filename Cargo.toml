@@ -1,12 +1,13 @@
 [package]
 name = "ptyknot"
-version = "0.1.3"
+version = "0.2.1"
 authors = ["Bart Massey <bart.massey@gmail.com>"]
 description = "Run a specified action as a controlled forked process."
 repository = "http://github.com/BartMassey/ptyknot"
 readme = "README.md"
 keywords = ["pty", "pseudotty", "process"]
-license-file = "COPYING"
+license-file = "LICENSE"
+edition = "2018"
 
 [lib]
 name = "ptyknot"
