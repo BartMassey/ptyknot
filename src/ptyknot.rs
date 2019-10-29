@@ -88,11 +88,7 @@ impl Plumbing {
                 PipeDirection::MasterWrite => (pipefds[1], pipefds[0]),
                 PipeDirection::MasterRead => (pipefds[0], pipefds[1])
             };
-        Ok(Plumbing {
-            master: master,
-            slave: slave,
-            slave_target: slave_target
-        })
+        Ok(Plumbing { master, slave, slave_target })
     }
 
     /// Implement the slave side of the plumbing by ensuring
@@ -151,7 +147,7 @@ impl Plumbing {
 /// ```
 pub fn ptyknot<F: Fn()>(action: F,
                         pty: Option<&mut File>,
-                        plumbing: &Vec<&Plumbing>)
+                        plumbing: &[&Plumbing])
                         -> Result<PtyKnot> {
     let pid = unsafe{ libc::fork() };
     match pid {
@@ -177,7 +173,8 @@ pub fn ptyknot<F: Fn()>(action: F,
             if let Some(master) = pty {
                 let slave_name = pty::ptsname(master)
                                  .expect("cannot get pty name");
-                drop(master);
+                // XXX This drop does nothing. Figure it out.
+                // drop(master);
                 // Open the pty, which will set it
                 // as the controlling terminal.
                 let slave_fd = OpenOptions::new()
@@ -202,7 +199,7 @@ pub fn ptyknot<F: Fn()>(action: F,
 
             std::process::exit(0)
         },
-        _ => Ok(PtyKnot{pid: pid})
+        _ => Ok(PtyKnot { pid })
     }
 }
 

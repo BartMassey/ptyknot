@@ -92,7 +92,7 @@ pub fn dup2(old: RawFd, new_fd: RawFd) -> Result<()> {
 /// Close a file descriptor.
 pub fn close(fd: RawFd) -> Result<()> {
     match unsafe { raw::close(fd) } {
-        -1 => { return Err(Error::last_os_error()) },
+        -1 => Err(Error::last_os_error()),
         _ => Ok(())
     }
 }
@@ -109,7 +109,7 @@ pub fn from_raw_fd(fd: RawFd) -> File {
 pub fn pipe() -> Result<[RawFd; 2]> {
     let mut pipefds: [RawFd; 2] = [0; 2];
     match unsafe { raw::pipe((&mut pipefds).as_mut_ptr()) } {
-        -1 => { return Err(Error::last_os_error()) },
+        -1 => Err(Error::last_os_error()),
         _ => Ok(pipefds)
     }
 }
