@@ -143,7 +143,7 @@ impl Plumbing {
 /// // This will wait for the child.
 /// drop(knot);
 /// ```
-pub fn ptyknot<F: Fn()>(action: F,
+pub fn ptyknot<F: FnOnce()>(action: F,
                         pty: Option<&mut File>,
                         plumbing: &[&Plumbing])
                         -> Result<PtyKnot> {
