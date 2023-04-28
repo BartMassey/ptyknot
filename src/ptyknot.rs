@@ -13,21 +13,21 @@
 //! caller can then later wait for the child to exit by
 //! dropping its last reference.
 
-use std::fs::{OpenOptions, File};
-use std::io::{Result, Error};
+use std::fs::{File, OpenOptions};
+use std::io::{Error, Result};
 use std::os::unix::io::RawFd;
 
 #[cfg(test)]
-use std::io::{BufReader, stdin};
-#[cfg(test)]
 use std::io::prelude::*;
+#[cfg(test)]
+use std::io::{stdin, BufReader};
 
 pub mod pty;
 
 /// Parent information about the child process.
 pub struct PtyKnot {
     /// Child process ID.
-    pub pid: i32
+    pub pid: i32,
 }
 
 impl Drop for PtyKnot {
@@ -50,7 +50,8 @@ impl Drop for PtyKnot {
 /// ```
 pub fn make_pty() -> Result<File> {
     let mut master = OpenOptions::new()
-        .read(true).write(true)
+        .read(true)
+        .write(true)
         .open("/dev/ptmx")?;
     pty::grantpt(&mut master)?;
     pty::unlockpt(&mut master)?;
@@ -62,31 +63,32 @@ pub enum PipeDirection {
     /// Master reads from pipe, slave writes.
     MasterRead,
     /// Master writes to pipe, slave reads.
-    MasterWrite
+    MasterWrite,
 }
 
 /// Information needed during the pipe plumbing process.
 pub struct Plumbing {
     master: RawFd,
     slave: RawFd,
-    slave_target: RawFd
+    slave_target: RawFd,
 }
 
 impl Plumbing {
-
     /// Create a new pipe running in the specified
     /// direction, and remember the file descriptor of the
     /// given file. This will later allow the slave to
     /// attach `slave_target` to the other end of the pipe.
-    pub fn new(direction: PipeDirection, slave_target: RawFd)
-           -> Result<Plumbing> {
+    pub fn new(direction: PipeDirection, slave_target: RawFd) -> Result<Plumbing> {
         let pipefds = pty::pipe()?;
-        let (master, slave) =
-            match direction {
-                PipeDirection::MasterWrite => (pipefds[1], pipefds[0]),
-                PipeDirection::MasterRead => (pipefds[0], pipefds[1])
-            };
-        Ok(Plumbing { master, slave, slave_target })
+        let (master, slave) = match direction {
+            PipeDirection::MasterWrite => (pipefds[1], pipefds[0]),
+            PipeDirection::MasterRead => (pipefds[0], pipefds[1]),
+        };
+        Ok(Plumbing {
+            master,
+            slave,
+            slave_target,
+        })
     }
 
     /// Implement the slave side of the plumbing by ensuring
@@ -143,11 +145,12 @@ impl Plumbing {
 /// // This will wait for the child.
 /// drop(knot);
 /// ```
-pub fn ptyknot<F: FnOnce()>(action: F,
-                        pty: Option<&mut File>,
-                        plumbing: &[&Plumbing])
-                        -> Result<PtyKnot> {
-    let pid = unsafe{ libc::fork() };
+pub fn ptyknot<F: FnOnce()>(
+    action: F,
+    pty: Option<&mut File>,
+    plumbing: &[&Plumbing],
+) -> Result<PtyKnot> {
+    let pid = unsafe { libc::fork() };
     match pid {
         -1 => Err(Error::last_os_error()),
         0 => {
@@ -162,22 +165,26 @@ pub fn ptyknot<F: FnOnce()>(action: F,
 
             // Get rid of the current controlling terminal.
             if unsafe { libc::setsid() } == -1 {
-                panic!(Error::last_os_error());
+                panic!(
+                    "could not lose controlling terminal: {}",
+                    Error::last_os_error()
+                );
             }
 
             // Set a new controlling terminal if desired by
             // opening a pty.
             let mut slave = None;
             if let Some(master) = pty {
-                let slave_name = pty::ptsname(master)
-                                 .expect("cannot get pty name");
+                let slave_name = pty::ptsname(master).expect("cannot get pty name");
                 // XXX This drop does nothing. Figure it out.
                 // drop(master);
                 // Open the pty, which will set it
                 // as the controlling terminal.
                 let slave_fd = OpenOptions::new()
-                    .read(true).write(true)
-                    .open(slave_name).expect("cannot open pty");
+                    .read(true)
+                    .write(true)
+                    .open(slave_name)
+                    .expect("cannot open pty");
                 // Need to leave the slave pty open in case
                 // the slave is going to open it, to avoid
                 // a race.
@@ -196,8 +203,8 @@ pub fn ptyknot<F: FnOnce()>(action: F,
             drop(slave);
 
             std::process::exit(0)
-        },
-        _ => Ok(PtyKnot { pid })
+        }
+        _ => Ok(PtyKnot { pid }),
     }
 }
 
@@ -282,23 +289,23 @@ macro_rules! ptyknot {
 #[cfg(test)]
 fn pty_slave() {
     let mut tty = OpenOptions::new()
-                  .write(true)
-                  .open("/dev/tty")
-                  .expect("cannot open /dev/tty");
+        .write(true)
+        .open("/dev/tty")
+        .expect("cannot open /dev/tty");
     tty.write("hello world\n".as_bytes())
-       .expect("cannot write to /dev/tty");
+        .expect("cannot write to /dev/tty");
     tty.flush().expect("cannot flush /dev/tty");
 }
 
 #[test]
 fn pty_test() {
     let mut pty = make_pty().expect("could not make pty");
-    let knot = ptyknot(pty_slave, Some(&mut pty), &vec![])
-               .expect("ptyknot fail");
+    let knot = ptyknot(pty_slave, Some(&mut pty), &[]).expect("ptyknot fail");
     let mut master = BufReader::new(&pty);
     let mut message = String::new();
-    master.read_line(&mut message)
-          .expect("could not read message");
+    master
+        .read_line(&mut message)
+        .expect("could not read message");
     drop(knot);
     assert_eq!(message.trim(), "hello world");
 }
@@ -307,39 +314,35 @@ fn pty_test() {
 fn pipe_slave() {
     // This needs to not be stdout for the test.
     // See https://github.com/rust-lang/rust/issues/35136 .
-    writeln!(std::io::stderr(), "hello world")
-    .expect("could not write message");
+    writeln!(std::io::stderr(), "hello world").expect("could not write message");
 }
 
 #[test]
 fn pipe_test() {
-    let pipeout = Plumbing::new(PipeDirection::MasterRead, 2)
-                  .expect("could not create pipeout");
-    let knot = ptyknot(pipe_slave, None, &vec![&pipeout])
-               .expect("ptyknot fail");
+    let pipeout = Plumbing::new(PipeDirection::MasterRead, 2).expect("could not create pipeout");
+    let knot = ptyknot(pipe_slave, None, &[&pipeout]).expect("ptyknot fail");
     let pipeout = pipeout.get_master().expect("could not get master");
     let mut master = BufReader::new(pipeout);
     let mut message = String::new();
-    master.read_line(&mut message)
-          .expect("could not read message");
+    master
+        .read_line(&mut message)
+        .expect("could not read message");
     drop(knot);
     assert_eq!(message.trim(), "hello world");
 }
 
-
 #[cfg(test)]
 fn macro_slave() {
     let mut tty = OpenOptions::new()
-                  .write(true)
-                  .open("/dev/tty")
-                  .expect("could not open /dev/tty");
+        .write(true)
+        .open("/dev/tty")
+        .expect("could not open /dev/tty");
     tty.write("hello world\n".as_bytes())
-       .expect("could not write /dev/tty");
+        .expect("could not write /dev/tty");
     tty.flush().expect("cannot flush /dev/tty");
     let mut input = BufReader::new(stdin());
     let mut message = String::new();
-    input.read_line(&mut message)
-         .expect("could not read stdin");
+    input.read_line(&mut message).expect("could not read stdin");
 }
 
 #[test]
@@ -347,10 +350,8 @@ pub fn macro_test() {
     ptyknot!(knot, macro_slave, @ child_pty, > child_stdin 0);
     let mut tty = BufReader::new(&child_pty);
     let mut message = String::new();
-    tty.read_line(&mut message)
-          .expect("could not read tty");
-    writeln!(child_stdin, "hello world\n")
-          .expect("could not write stdin");
+    tty.read_line(&mut message).expect("could not read tty");
+    writeln!(child_stdin, "hello world\n").expect("could not write stdin");
     // This will wait for the child.
     drop(knot);
 }

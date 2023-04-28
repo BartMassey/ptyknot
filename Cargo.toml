@@ -7,7 +7,7 @@ repository = "http://github.com/BartMassey/ptyknot"
 readme = "README.md"
 keywords = ["pty", "pseudotty", "process"]
 license-file = "LICENSE"
-edition = "2018"
+edition = "2021"
 
 [lib]
 name = "ptyknot"

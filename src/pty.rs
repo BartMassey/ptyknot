@@ -10,19 +10,19 @@
 //!
 //! Much of this is code borrowed from <http://github.com/stemjail/tty-rs>.
 
-use std::path::*;
-use std::fs::File;
-use std::io::{Result, Error, ErrorKind};
-use std::os::unix::io::{RawFd, AsRawFd, FromRawFd};
-use std::ffi::{CStr, OsString};
-use std::os::unix::ffi::OsStringExt;
 use libc::{c_int, pid_t};
+use std::ffi::{CStr, OsString};
+use std::fs::File;
+use std::io::{Error, ErrorKind, Result};
+use std::os::unix::ffi::OsStringExt;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::path::*;
 
 mod raw {
-    use libc::{c_int, c_char};
-    pub use libc::{waitpid, dup2, close, pipe};
+    use libc::{c_char, c_int};
+    pub use libc::{close, dup2, pipe, waitpid};
 
-    extern {
+    extern "C" {
         pub fn grantpt(fd: c_int) -> c_int;
         pub fn unlockpt(fd: c_int) -> c_int;
         pub fn ptsname(fd: c_int) -> *const c_char;
@@ -32,34 +32,43 @@ mod raw {
 /// Change the mode and owner of the slave pty associated
 /// with a given open master. See `grantpt(3)` in the UNIX
 /// manual pages for details.
-pub fn grantpt<T>(master: &mut T) -> Result<()> where T: AsRawFd {
+pub fn grantpt<T>(master: &mut T) -> Result<()>
+where
+    T: AsRawFd,
+{
     match unsafe { raw::grantpt(master.as_raw_fd()) } {
         -1 => Err(Error::last_os_error()),
-        _ => Ok(())
+        _ => Ok(()),
     }
 }
 
 /// "Unlocks" the slave pty associated with the give nopen
 /// master. See `unlockpt(3)` in the UNIX manual pages for
 /// details.
-pub fn unlockpt<T>(master: &mut T) -> Result<()> where T: AsRawFd {
+pub fn unlockpt<T>(master: &mut T) -> Result<()>
+where
+    T: AsRawFd,
+{
     match unsafe { raw::unlockpt(master.as_raw_fd()) } {
         -1 => Err(Error::last_os_error()),
-        _ => Ok(())
+        _ => Ok(()),
     }
 }
 
 /// Returns the name of the slave pty associated with the
 /// given open master. See `unlockpt(3)` in the UNIX manual
 /// pages for details.
-pub fn ptsname<T>(master: &mut T) -> Result<PathBuf> where T: AsRawFd {
+pub fn ptsname<T>(master: &mut T) -> Result<PathBuf>
+where
+    T: AsRawFd,
+{
     let cstr = match unsafe { raw::ptsname(master.as_raw_fd()).as_ref() } {
         None => return Err(Error::last_os_error()),
-        Some(ptr) => unsafe { CStr::from_ptr(ptr) }
+        Some(ptr) => unsafe { CStr::from_ptr(ptr) },
     };
     let buf = match cstr.to_str() {
         Ok(s) => s,
-        Err(e) => return Err(Error::new(ErrorKind::InvalidData, e))
+        Err(e) => return Err(Error::new(ErrorKind::InvalidData, e)),
     };
     let os_string = OsString::from_vec(buf.as_bytes().to_vec());
     Ok(PathBuf::from(os_string))
@@ -70,11 +79,9 @@ pub fn ptsname<T>(master: &mut T) -> Result<PathBuf> where T: AsRawFd {
 /// pages for details.
 pub fn waitpid(pid: i32) -> Result<i32> {
     let mut status: c_int = 0;
-    match unsafe { raw::waitpid(pid as pid_t,
-                                &mut status as *mut c_int,
-                                0) } {
+    match unsafe { raw::waitpid(pid as pid_t, &mut status as *mut c_int, 0) } {
         -1 => Err(Error::last_os_error()),
-        _ => Ok(status as i32)
+        _ => Ok(status),
     }
 }
 
@@ -85,7 +92,7 @@ pub fn waitpid(pid: i32) -> Result<i32> {
 pub fn dup2(old: RawFd, new_fd: RawFd) -> Result<()> {
     match unsafe { raw::dup2(old, new_fd) } {
         -1 => Err(Error::last_os_error()),
-        _ => Ok(())
+        _ => Ok(()),
     }
 }
 
@@ -93,7 +100,7 @@ pub fn dup2(old: RawFd, new_fd: RawFd) -> Result<()> {
 pub fn close(fd: RawFd) -> Result<()> {
     match unsafe { raw::close(fd) } {
         -1 => Err(Error::last_os_error()),
-        _ => Ok(())
+        _ => Ok(()),
     }
 }
 
@@ -108,8 +115,8 @@ pub fn from_raw_fd(fd: RawFd) -> File {
 /// `pipe(2)` in the UNIX manual pages for details.
 pub fn pipe() -> Result<[RawFd; 2]> {
     let mut pipefds: [RawFd; 2] = [0; 2];
-    match unsafe { raw::pipe((&mut pipefds).as_mut_ptr()) } {
+    match unsafe { raw::pipe(pipefds.as_mut_ptr()) } {
         -1 => Err(Error::last_os_error()),
-        _ => Ok(pipefds)
+        _ => Ok(pipefds),
     }
 }
