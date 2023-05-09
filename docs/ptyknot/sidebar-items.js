@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PipeDirection"],"fn":["make_pty","pty_stderr","pty_stdin","pty_stdout","ptyknot"],"macro":["ptyknot"],"mod":["pty"],"struct":["Plumbing","PtyKnot"]};

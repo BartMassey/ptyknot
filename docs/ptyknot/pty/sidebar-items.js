@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["close","dup2","grantpt","pipe","ptsname","unlockpt","waitpid"]};
