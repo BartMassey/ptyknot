@@ -9,9 +9,5 @@ keywords = ["pty", "pseudotty", "process"]
 license-file = "LICENSE"
 edition = "2021"
 
-[lib]
-name = "ptyknot"
-path = "src/ptyknot.rs"
-
 [dependencies]
 libc = "0.2"

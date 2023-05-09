@@ -15,7 +15,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{Error, Result};
-use std::os::unix::io::RawFd;
+use std::os::fd::FromRawFd;
 
 #[cfg(test)]
 use std::io::prelude::*;
@@ -24,6 +24,25 @@ use std::io::{stdin, BufReader};
 
 pub mod pty;
 
+/// Stdin for pty-side interface.
+pub fn pty_stdin() -> File {
+    // # Safety
+    // On POSIX systems file descriptor 0 is stdin.
+    unsafe { File::from_raw_fd(0) }
+}
+
+/// Stdout for pty-side interface.
+pub fn pty_stdout() -> File {
+    // On POSIX systems file descriptor 1 is stdout.
+    unsafe { File::from_raw_fd(1) }
+}
+
+/// Stderr for pty-side interface.
+pub fn pty_stderr() -> File {
+    // On POSIX systems file descriptor 2 is stderr.
+    unsafe { File::from_raw_fd(2) }
+}
+
 /// Parent information about the child process.
 pub struct PtyKnot {
     /// Child process ID.
@@ -31,7 +50,7 @@ pub struct PtyKnot {
 }
 
 impl Drop for PtyKnot {
-    /// When the `PtyKnot` is dropped, its child process is waited for.
+    // When the `PtyKnot` is dropped, its child process is waited for.
     fn drop(&mut self) {
         let _ = pty::waitpid(self.pid);
     }
@@ -49,12 +68,12 @@ impl Drop for PtyKnot {
 ///                .expect("could not convert slave name"));
 /// ```
 pub fn make_pty() -> Result<File> {
-    let mut master = OpenOptions::new()
+    let master = OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/ptmx")?;
-    pty::grantpt(&mut master)?;
-    pty::unlockpt(&mut master)?;
+    pty::grantpt(&master)?;
+    pty::unlockpt(&master)?;
     Ok(master)
 }
 
@@ -68,9 +87,9 @@ pub enum PipeDirection {
 
 /// Information needed during the pipe plumbing process.
 pub struct Plumbing {
-    master: RawFd,
-    slave: RawFd,
-    slave_target: RawFd,
+    master: File,
+    slave: File,
+    slave_target: File,
 }
 
 impl Plumbing {
@@ -78,11 +97,11 @@ impl Plumbing {
     /// direction, and remember the file descriptor of the
     /// given file. This will later allow the slave to
     /// attach `slave_target` to the other end of the pipe.
-    pub fn new(direction: PipeDirection, slave_target: RawFd) -> Result<Plumbing> {
-        let pipefds = pty::pipe()?;
+    pub fn new(direction: PipeDirection, slave_target: File) -> Result<Plumbing> {
+        let [pipefds0, pipefds1] = pty::pipe()?;
         let (master, slave) = match direction {
-            PipeDirection::MasterWrite => (pipefds[1], pipefds[0]),
-            PipeDirection::MasterRead => (pipefds[0], pipefds[1]),
+            PipeDirection::MasterWrite => (pipefds1, pipefds0),
+            PipeDirection::MasterRead => (pipefds0, pipefds1),
         };
         Ok(Plumbing {
             master,
@@ -95,15 +114,15 @@ impl Plumbing {
     /// that the slave end of the pipe is attached to the
     /// previously-supplied file descriptor.
     pub fn plumb_slave(&self) -> Result<()> {
-        pty::close(self.master)?;
-        pty::dup2(self.slave, self.slave_target)
+        pty::close(&self.master)?;
+        pty::dup2(&self.slave, &self.slave_target)
     }
 
     /// Extract the master side of the pipe for use by
     /// the parent.
     pub fn get_master(self) -> Result<File> {
-        pty::close(self.slave)?;
-        Ok(pty::from_raw_fd(self.master))
+        pty::close(&self.slave)?;
+        Ok(self.master)
     }
 }
 
@@ -147,9 +166,12 @@ impl Plumbing {
 /// ```
 pub fn ptyknot<F: FnOnce()>(
     action: F,
-    pty: Option<&mut File>,
+    pty: Option<&File>,
     plumbing: &[&Plumbing],
 ) -> Result<PtyKnot> {
+    // # Safety
+    // `fork()` has no UB possibilities. It will
+    // either succeed or fail.
     let pid = unsafe { libc::fork() };
     match pid {
         -1 => Err(Error::last_os_error()),
@@ -164,6 +186,9 @@ pub fn ptyknot<F: FnOnce()>(
             // understand this mess.
 
             // Get rid of the current controlling terminal.
+            // # Safety
+            // `setsid()` has no UB possibilities. It will
+            // either succeed or fail.
             if unsafe { libc::setsid() } == -1 {
                 panic!(
                     "could not lose controlling terminal: {}",
@@ -319,7 +344,8 @@ fn pipe_slave() {
 
 #[test]
 fn pipe_test() {
-    let pipeout = Plumbing::new(PipeDirection::MasterRead, 2).expect("could not create pipeout");
+    let pipeout =
+        Plumbing::new(PipeDirection::MasterRead, pty_stderr()).expect("could not create pipeout");
     let knot = ptyknot(pipe_slave, None, &[&pipeout]).expect("ptyknot fail");
     let pipeout = pipeout.get_master().expect("could not get master");
     let mut master = BufReader::new(pipeout);
@@ -347,7 +373,7 @@ fn macro_slave() {
 
 #[test]
 pub fn macro_test() {
-    ptyknot!(knot, macro_slave, @ child_pty, > child_stdin 0);
+    ptyknot!(knot, macro_slave, @ child_pty, > child_stdin pty_stdin());
     let mut tty = BufReader::new(&child_pty);
     let mut message = String::new();
     tty.read_line(&mut message).expect("could not read tty");
