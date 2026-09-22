@@ -88,24 +88,24 @@ pub fn waitpid(pid: i32) -> Result<i32> {
     }
 }
 
-/// Make the underlying file of `dst` refer to the
-/// underlying file of `src`. If `dst` is open, it will
-/// be closed first. See `dup2(2)` in the UNIX manual
-/// pages for details.
-pub fn dup2(old: &File, new_fd: &File) -> Result<()> {
+/// Close a raw file descriptor in the child process.
+pub(crate) fn close(fd: RawFd) -> Result<()> {
     // # Safety
-    // `dup2()` will safely accept invalid file descriptors.
-    match unsafe { raw::dup2(old.as_raw_fd(), new_fd.as_raw_fd()) } {
+    // `close()` accepts any raw file descriptor value.
+    match unsafe { raw::close(fd) } {
         -1 => Err(Error::last_os_error()),
         _ => Ok(()),
     }
 }
 
-/// Close a file descriptor.
-pub fn close(fd: &File) -> Result<()> {
+/// Make the underlying file of `dst` refer to the
+/// underlying file of `src`. If `dst` is open, it will
+/// be closed first. See `dup2(2)` in the UNIX manual
+/// pages for details.
+pub fn dup2(old: &File, new_fd: crate::StdFd) -> Result<()> {
     // # Safety
-    // `close()` will safely accept an invalid file descriptor.
-    match unsafe { raw::close(fd.as_raw_fd()) } {
+    // `dup2()` will safely accept invalid file descriptors.
+    match unsafe { raw::dup2(old.as_raw_fd(), new_fd.as_raw_fd()) } {
         -1 => Err(Error::last_os_error()),
         _ => Ok(()),
     }

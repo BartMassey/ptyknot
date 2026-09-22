@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["close","dup2","grantpt","pipe","ptsname","unlockpt","waitpid"]};
+window.SIDEBAR_ITEMS = {"fn":["dup2","grantpt","pipe","ptsname","unlockpt","waitpid"]};

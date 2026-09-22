@@ -15,32 +15,42 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{Error, Result};
-use std::os::fd::FromRawFd;
+use std::os::unix::io::AsRawFd;
 
 #[cfg(test)]
 use std::io::prelude::*;
 #[cfg(test)]
-use std::io::{stdin, BufReader};
+use std::io::{BufReader, stdin};
 
 pub mod pty;
 
-/// Stdin for pty-side interface.
-pub fn pty_stdin() -> File {
-    // # Safety
-    // On POSIX systems file descriptor 0 is stdin.
-    unsafe { File::from_raw_fd(0) }
+use std::os::unix::io::RawFd;
+
+/// Represents a standard file descriptor to be overwritten
+/// in the child process.
+#[derive(Copy, Clone, Debug)]
+pub struct StdFd(RawFd);
+
+impl StdFd {
+    /// Get the underlying raw file descriptor.
+    pub fn as_raw_fd(&self) -> RawFd {
+        self.0
+    }
 }
 
-/// Stdout for pty-side interface.
-pub fn pty_stdout() -> File {
-    // On POSIX systems file descriptor 1 is stdout.
-    unsafe { File::from_raw_fd(1) }
+/// Stdin target for the pty-side interface.
+pub fn pty_stdin() -> StdFd {
+    StdFd(0)
 }
 
-/// Stderr for pty-side interface.
-pub fn pty_stderr() -> File {
-    // On POSIX systems file descriptor 2 is stderr.
-    unsafe { File::from_raw_fd(2) }
+/// Stdout target for the pty-side interface.
+pub fn pty_stdout() -> StdFd {
+    StdFd(1)
+}
+
+/// Stderr target for the pty-side interface.
+pub fn pty_stderr() -> StdFd {
+    StdFd(2)
 }
 
 /// Parent information about the child process.
@@ -89,7 +99,7 @@ pub enum PipeDirection {
 pub struct Plumbing {
     master: File,
     slave: File,
-    slave_target: File,
+    slave_target: StdFd,
 }
 
 impl Plumbing {
@@ -97,7 +107,7 @@ impl Plumbing {
     /// direction, and remember the file descriptor of the
     /// given file. This will later allow the slave to
     /// attach `slave_target` to the other end of the pipe.
-    pub fn new(direction: PipeDirection, slave_target: File) -> Result<Plumbing> {
+    pub fn new(direction: PipeDirection, slave_target: StdFd) -> Result<Plumbing> {
         let [pipefds0, pipefds1] = pty::pipe()?;
         let (master, slave) = match direction {
             PipeDirection::MasterWrite => (pipefds1, pipefds0),
@@ -113,15 +123,14 @@ impl Plumbing {
     /// Implement the slave side of the plumbing by ensuring
     /// that the slave end of the pipe is attached to the
     /// previously-supplied file descriptor.
-    pub fn plumb_slave(&self) -> Result<()> {
-        pty::close(&self.master)?;
-        pty::dup2(&self.slave, &self.slave_target)
+    fn plumb_slave(&self) -> Result<()> {
+        pty::close(self.master.as_raw_fd())?;
+        pty::dup2(&self.slave, self.slave_target)
     }
 
     /// Extract the master side of the pipe for use by
     /// the parent.
     pub fn get_master(self) -> Result<File> {
-        pty::close(&self.slave)?;
         Ok(self.master)
     }
 }
@@ -137,6 +146,10 @@ impl Plumbing {
 /// cause the child to be set up with the slave side of that
 /// pseudoterminal as its controlling terminal. Otherwise,
 /// the child will be set up with no controlling terminal.
+///
+/// The action must not access the PTY or plumbing values
+/// passed to this function. Their child-side descriptors are
+/// closed or reassigned before the action runs.
 ///
 /// # Examples
 ///
@@ -176,58 +189,64 @@ pub fn ptyknot<F: FnOnce()>(
     match pid {
         -1 => Err(Error::last_os_error()),
         0 => {
-            // In the child process, there's no opportunity
-            // to return an error, so we'll just panic if
-            // there's a problem.
+            let child_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                // In the child process, there's no opportunity
+                // to return an error, so we'll just panic if
+                // there's a problem.
 
-            // Thanks much to
-            // https://www.win.tue.nl/~aeb/linux/lk/lk-10.html
-            // at "Getting a controlling tty" for helping
-            // understand this mess.
+                // Thanks much to
+                // https://www.win.tue.nl/~aeb/linux/lk/lk-10.html
+                // at "Getting a controlling tty" for helping
+                // understand this mess.
 
-            // Get rid of the current controlling terminal.
+                // Get rid of the current controlling terminal.
+                // # Safety
+                // `setsid()` has no UB possibilities. It will
+                // either succeed or fail.
+                if unsafe { libc::setsid() } == -1 {
+                    panic!(
+                        "could not lose controlling terminal: {}",
+                        Error::last_os_error()
+                    );
+                }
+
+                // Set a new controlling terminal if desired by
+                // opening a pty.
+                let mut slave = None;
+                if let Some(master) = pty {
+                    let slave_name = pty::ptsname(master).expect("cannot get pty name");
+                    pty::close(master.as_raw_fd()).expect("cannot close pty master");
+                    // Open the pty, which will set it
+                    // as the controlling terminal.
+                    let slave_fd = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open(slave_name)
+                        .expect("cannot open pty");
+                    // Need to leave the slave pty open in case
+                    // the slave is going to open it, to avoid
+                    // a race.
+                    slave = Some(slave_fd);
+                }
+
+                // Set up any requested plumbing.
+                for p in plumbing {
+                    p.plumb_slave().expect("could not plumb pipe");
+                }
+
+                // Run the user action.
+                action();
+
+                // The slave side is no longer needed.
+                drop(slave);
+            }));
+
+            let status = if child_result.is_ok() { 0 } else { 101 };
             // # Safety
-            // `setsid()` has no UB possibilities. It will
-            // either succeed or fail.
-            if unsafe { libc::setsid() } == -1 {
-                panic!(
-                    "could not lose controlling terminal: {}",
-                    Error::last_os_error()
-                );
-            }
-
-            // Set a new controlling terminal if desired by
-            // opening a pty.
-            let mut slave = None;
-            if let Some(master) = pty {
-                let slave_name = pty::ptsname(master).expect("cannot get pty name");
-                // XXX This drop does nothing. Figure it out.
-                // drop(master);
-                // Open the pty, which will set it
-                // as the controlling terminal.
-                let slave_fd = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(slave_name)
-                    .expect("cannot open pty");
-                // Need to leave the slave pty open in case
-                // the slave is going to open it, to avoid
-                // a race.
-                slave = Some(slave_fd);
-            }
-
-            // Set up any requested plumbing.
-            for p in plumbing {
-                p.plumb_slave().expect("could not plumb pipe");
-            }
-
-            // Run the user action.
-            action();
-
-            // The slave side is no longer needed.
-            drop(slave);
-
-            std::process::exit(0)
+            // This is the child process and no Rust values
+            // may be dropped after their descriptors have
+            // been closed or reassigned.
+            unsafe { libc::_exit(status) }
         }
         _ => Ok(PtyKnot { pid }),
     }
@@ -243,10 +262,10 @@ pub fn ptyknot<F: FnOnce()>(
 ///   followed by a pseudo-tty identifier.
 /// * Zero or more master read redirections, consisting of
 ///   `<` followed by a master read identifier and
-///   an integer file descriptor expression.
+///   a standard file descriptor expression.
 /// * Zero or more master write redirections, consisting of
 ///   `>` followed by a master write identifier and
-///   an integer file descriptor expression.
+///   a standard file descriptor expression.
 ///
 /// The macro will `let`-declare the necessary handles,
 /// assemble them and pass them to `ptyknot()`, then
@@ -300,7 +319,7 @@ macro_rules! ptyknot {
                                 0 => None,
                                 _ => Some(&mut $($tty)*),
                             },
-                            &vec![$(&$master_read,)* $(&$master_write,)*])
+                            &[$(&$master_read,)* $(&$master_write,)*])
             .expect("ptyknot failed");
         $(let $master_read =
           $master_read.get_master()
@@ -317,15 +336,15 @@ fn pty_slave() {
         .write(true)
         .open("/dev/tty")
         .expect("cannot open /dev/tty");
-    tty.write("hello world\n".as_bytes())
+    tty.write_all("hello world\n".as_bytes())
         .expect("cannot write to /dev/tty");
     tty.flush().expect("cannot flush /dev/tty");
 }
 
 #[test]
 fn pty_test() {
-    let mut pty = make_pty().expect("could not make pty");
-    let knot = ptyknot(pty_slave, Some(&mut pty), &[]).expect("ptyknot fail");
+    let pty = make_pty().expect("could not make pty");
+    let knot = ptyknot(pty_slave, Some(&pty), &[]).expect("ptyknot fail");
     let mut master = BufReader::new(&pty);
     let mut message = String::new();
     master
@@ -363,7 +382,7 @@ fn macro_slave() {
         .write(true)
         .open("/dev/tty")
         .expect("could not open /dev/tty");
-    tty.write("hello world\n".as_bytes())
+    tty.write_all("hello world\n".as_bytes())
         .expect("could not write /dev/tty");
     tty.flush().expect("cannot flush /dev/tty");
     let mut input = BufReader::new(stdin());
@@ -380,4 +399,25 @@ pub fn macro_test() {
     writeln!(child_stdin, "hello world\n").expect("could not write stdin");
     // This will wait for the child.
     drop(knot);
+}
+
+#[test]
+fn plumbing_preserves_parent_standard_descriptors() {
+    let descriptors = [pty_stdin(), pty_stdout(), pty_stderr()];
+    for descriptor in descriptors {
+        let fd_path = format!("/proc/self/fd/{}", descriptor.as_raw_fd());
+        assert!(
+            std::fs::metadata(&fd_path).is_ok(),
+            "standard descriptor was not open before plumbing: {fd_path}"
+        );
+
+        let plumbing = Plumbing::new(PipeDirection::MasterRead, descriptor)
+            .expect("could not create plumbing");
+        drop(plumbing.get_master().expect("could not get master"));
+
+        assert!(
+            std::fs::metadata(&fd_path).is_ok(),
+            "plumbing closed parent standard descriptor: {fd_path}"
+        );
+    }
 }
