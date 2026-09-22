@@ -55,14 +55,16 @@ pub fn pty_stderr() -> StdFd {
 
 /// Parent information about the child process.
 pub struct PtyKnot {
-    /// Child process ID.
-    pub pid: i32,
+    /// Child process ID, if it has not already been reaped.
+    pub pid: Option<i32>,
 }
 
 impl Drop for PtyKnot {
     // When the `PtyKnot` is dropped, its child process is waited for.
     fn drop(&mut self) {
-        let _ = pty::waitpid(self.pid);
+        if let Some(pid) = self.pid.take() {
+            let _ = pty::waitpid(pid);
+        }
     }
 }
 
@@ -120,185 +122,170 @@ impl Plumbing {
         })
     }
 
-    /// Implement the slave side of the plumbing by ensuring
-    /// that the slave end of the pipe is attached to the
-    /// previously-supplied file descriptor.
-    fn plumb_slave(&self) -> Result<()> {
-        pty::close(self.master.as_raw_fd())?;
-        pty::dup2(&self.slave, self.slave_target)
-    }
+    fn install_in_child(self) -> Result<()> {
+        use std::os::unix::io::IntoRawFd;
+        let Plumbing {
+            master,
+            slave,
+            slave_target,
+        } = self;
 
-    /// Extract the master side of the pipe for use by
-    /// the parent.
-    pub fn get_master(self) -> Result<File> {
-        Ok(self.master)
-    }
-}
-
-/// Start a child process running the given action,
-/// returning a `PtyKnot` for process information (currently
-/// just a process ID). When the the structure's destructor
-/// is called, it will wait to reap the child process and
-/// panic if it has crashed or exited with non-zero status.
-///
-/// The optional `pty` argument, if supplied with the master
-/// side of a pseudoterminal as created by `make_pty()`, will
-/// cause the child to be set up with the slave side of that
-/// pseudoterminal as its controlling terminal. Otherwise,
-/// the child will be set up with no controlling terminal.
-///
-/// The action must not access the PTY or plumbing values
-/// passed to this function. Their child-side descriptors are
-/// closed or reassigned before the action runs.
-///
-/// # Examples
-///
-/// ```
-/// use std::fs::OpenOptions;
-/// use std::io::{Write, BufRead, BufReader};
-///
-/// fn slave() {
-///     let mut tty = OpenOptions::new()
-///                   .write(true)
-///                   .open("/dev/tty")
-///                   .expect("cannot open /dev/tty");
-///     tty.write("hello world\n".as_bytes())
-///        .expect("cannot write to /dev/tty");
-///     tty.flush().expect("cannot flush /dev/tty");
-/// }
-///
-/// let mut pty = ptyknot::make_pty().expect("could not make pty");
-/// let knot = ptyknot::ptyknot(slave, Some(&mut pty), &vec![])
-///            .expect("cannot create slave");
-/// let mut tty = BufReader::new(&pty);
-/// let mut message = String::new();
-/// tty.read_line(&mut message)
-///    .expect("could not read message");
-/// // This will wait for the child.
-/// drop(knot);
-/// ```
-pub fn ptyknot<F: FnOnce()>(
-    action: F,
-    pty: Option<&File>,
-    plumbing: &[&Plumbing],
-) -> Result<PtyKnot> {
-    // # Safety
-    // `fork()` has no UB possibilities. It will
-    // either succeed or fail.
-    let pid = unsafe { libc::fork() };
-    match pid {
-        -1 => Err(Error::last_os_error()),
-        0 => {
-            let child_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                // In the child process, there's no opportunity
-                // to return an error, so we'll just panic if
-                // there's a problem.
-
-                // Thanks much to
-                // https://www.win.tue.nl/~aeb/linux/lk/lk-10.html
-                // at "Getting a controlling tty" for helping
-                // understand this mess.
-
-                // Get rid of the current controlling terminal.
-                // # Safety
-                // `setsid()` has no UB possibilities. It will
-                // either succeed or fail.
-                if unsafe { libc::setsid() } == -1 {
-                    panic!(
-                        "could not lose controlling terminal: {}",
-                        Error::last_os_error()
-                    );
-                }
-
-                // Set a new controlling terminal if desired by
-                // opening a pty.
-                let mut slave = None;
-                if let Some(master) = pty {
-                    let slave_name = pty::ptsname(master).expect("cannot get pty name");
-                    pty::close(master.as_raw_fd()).expect("cannot close pty master");
-                    // Open the pty, which will set it
-                    // as the controlling terminal.
-                    let slave_fd = OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .open(slave_name)
-                        .expect("cannot open pty");
-                    // Need to leave the slave pty open in case
-                    // the slave is going to open it, to avoid
-                    // a race.
-                    slave = Some(slave_fd);
-                }
-
-                // Set up any requested plumbing.
-                for p in plumbing {
-                    p.plumb_slave().expect("could not plumb pipe");
-                }
-
-                // Run the user action.
-                action();
-
-                // The slave side is no longer needed.
-                drop(slave);
-            }));
-
-            let status = if child_result.is_ok() { 0 } else { 101 };
-            // # Safety
-            // This is the child process and no Rust values
-            // may be dropped after their descriptors have
-            // been closed or reassigned.
-            unsafe { libc::_exit(status) }
+        drop(master);
+        if slave.as_raw_fd() != slave_target.as_raw_fd() {
+            pty::dup2(&slave, slave_target)?;
+            drop(slave);
+        } else {
+            let _ = slave.into_raw_fd();
         }
-        _ => Ok(PtyKnot { pid }),
+        Ok(())
+    }
+
+    fn into_parent(self) -> File {
+        let Plumbing {
+            master,
+            slave,
+            slave_target: _,
+        } = self;
+        drop(slave);
+        master
     }
 }
 
-/// Provide a cleaner interface to `ptyknot()` *et al* by
-/// doing variable declaration and redeclaration.  The
-/// first argument is the identifier for the resulting knot.
-/// The second argument is the child action, as with
-/// `ptyknot()`. The rest of the arguments are:
-///
-/// * Zero or one pty redirections, consisting of `@`
-///   followed by a pseudo-tty identifier.
-/// * Zero or more master read redirections, consisting of
-///   `<` followed by a master read identifier and
-///   a standard file descriptor expression.
-/// * Zero or more master write redirections, consisting of
-///   `>` followed by a master write identifier and
-///   a standard file descriptor expression.
-///
-/// The macro will `let`-declare the necessary handles,
-/// assemble them and pass them to `ptyknot()`, then
-/// redeclare the handles to allow the master to manipulate
-/// them.
-///
-/// #Example
-///
-/// ```
-/// # use ptyknot::*;
-/// use std::fs::OpenOptions;
-/// use std::io::{Write, BufRead, BufReader};
-///
-/// fn slave() {
-///     let mut tty = OpenOptions::new()
-///                   .write(true)
-///                   .open("/dev/tty")
-///                   .expect("cannot open /dev/tty");
-///     tty.write("hello world\n".as_bytes())
-///        .expect("cannot write to /dev/tty");
-///     tty.flush().expect("cannot flush /dev/tty");
-/// }
-///
-/// # pub fn main() {
-/// ptyknot!(knot, slave, @ pty);
-/// let mut tty = BufReader::new(&pty);
-/// let mut message = String::new();
-/// tty.read_line(&mut message)
-///    .expect("could not read message");
-/// // This will wait for the child.
-/// drop(knot);
-/// # }
-/// ```
+struct PreparedPty {
+    master: File,
+    slave_name: std::path::PathBuf,
+}
+
+/// Setup configuration for spawning a child process.
+pub struct PtyKnotSetup {
+    pty: Option<PreparedPty>,
+    plumbing: Vec<Plumbing>,
+}
+
+/// Handles retained by the parent process.
+pub struct ParentHandles {
+    pty: Option<File>,
+    pipes: Vec<File>,
+}
+
+/// The result of spawning a child process.
+pub struct Spawned {
+    /// Handles to communicate with the child.
+    pub handles: ParentHandles,
+    /// Information about the child process.
+    pub knot: PtyKnot,
+}
+
+impl Spawned {
+    /// Consume the result, returning handles and knot.
+    pub fn into_parts(self) -> (ParentHandles, PtyKnot) {
+        (self.handles, self.knot)
+    }
+}
+
+impl ParentHandles {
+    #[doc(hidden)]
+    pub fn into_parts(self) -> (Option<File>, Vec<File>) {
+        (self.pty, self.pipes)
+    }
+}
+
+impl PtyKnotSetup {
+    /// Create a new setup configuration.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        PtyKnotSetup {
+            pty: None,
+            plumbing: Vec::new(),
+        }
+    }
+
+    /// Add a pre-created PTY to the setup.
+    pub fn with_pty(mut self, master: File) -> Result<Self> {
+        let slave_name = pty::ptsname(&master)?;
+        self.pty = Some(PreparedPty { master, slave_name });
+        Ok(self)
+    }
+
+    /// Add a pipe to the setup.
+    pub fn with_plumbing(mut self, plumbing: Plumbing) -> Self {
+        self.plumbing.push(plumbing);
+        self
+    }
+
+    /// Spawn the child process and return handles to it.
+    ///
+    /// ```compile_fail
+    /// use ptyknot::{make_pty, PtyKnotSetup};
+    /// let pty = make_pty().unwrap();
+    /// let setup = PtyKnotSetup::new().with_pty(pty).unwrap();
+    /// // This should fail to compile because pty is moved into setup.
+    /// setup.spawn(|| {
+    ///     let _ = pty;
+    /// }).unwrap();
+    /// ```
+    pub fn spawn<F>(self, action: F) -> Result<Spawned>
+    where
+        F: FnOnce(),
+    {
+        // # Safety
+        // `fork()` has no UB possibilities. It will
+        // either succeed or fail.
+        let pid = unsafe { libc::fork() };
+        match pid {
+            -1 => Err(Error::last_os_error()),
+            0 => {
+                let child_result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                        // Get rid of the current controlling terminal.
+                        // # Safety
+                        // `setsid()` has no UB possibilities. It will
+                        // either succeed or fail.
+                        if unsafe { libc::setsid() } == -1 {
+                            panic!(
+                                "could not lose controlling terminal: {}",
+                                Error::last_os_error()
+                            );
+                        }
+
+                        let _slave = if let Some(prepared) = self.pty {
+                            drop(prepared.master);
+                            let slave_fd = OpenOptions::new()
+                                .read(true)
+                                .write(true)
+                                .open(prepared.slave_name)
+                                .expect("cannot open pty");
+                            Some(slave_fd)
+                        } else {
+                            None
+                        };
+
+                        for p in self.plumbing {
+                            p.install_in_child().expect("could not plumb pipe");
+                        }
+
+                        action();
+                    }));
+
+                let status = if child_result.is_ok() { 0 } else { 101 };
+                // # Safety
+                // This is the child process and no Rust values
+                // may be dropped after their descriptors have
+                // been closed or reassigned.
+                unsafe { libc::_exit(status) }
+            }
+            pid => {
+                let pty = self.pty.map(|p| p.master);
+                let pipes = self.plumbing.into_iter().map(|p| p.into_parent()).collect();
+                let handles = ParentHandles { pty, pipes };
+                let knot = PtyKnot { pid: Some(pid) };
+                Ok(Spawned { handles, knot })
+            }
+        }
+    }
+}
+
+/// Provide a cleaner interface to the child spawning process.
 #[macro_export]
 macro_rules! ptyknot {
     ($knot:ident,
@@ -306,27 +293,41 @@ macro_rules! ptyknot {
      $(, @ $tty:ident)*
      $(, < $master_read:ident $read_fd:expr)*
      $(, > $master_write:ident $write_fd:expr)*) => {
-        $(let mut $tty = $crate::make_pty().expect("could not make pty");)*
+        $(let $tty = $crate::make_pty().expect("could not make pty");)*
         $(let $master_read =
-          $crate::Plumbing::new($crate::PipeDirection::MasterRead,$read_fd)
+          $crate::Plumbing::new($crate::PipeDirection::MasterRead, $read_fd)
           .expect("$master_read: create failed");)*
         $(let $master_write =
-          $crate::Plumbing::new(PipeDirection::MasterWrite,$write_fd)
+          $crate::Plumbing::new($crate::PipeDirection::MasterWrite, $write_fd)
           .expect("$master_write: create failed");)*
-        let $knot =
-            $crate::ptyknot($slave,
-                            match [$(&$tty)*].len() {
-                                0 => None,
-                                _ => Some(&mut $($tty)*),
-                            },
-                            &[$(&$master_read,)* $(&$master_write,)*])
-            .expect("ptyknot failed");
-        $(let $master_read =
-          $master_read.get_master()
-          .expect("$master_read: get master failed");)*
-        $(let mut $master_write =
-          $master_write.get_master()
-          .expect("$master_write: get master failed");)*
+
+        let mut setup = $crate::PtyKnotSetup::new();
+        $(
+            setup = setup.with_pty($tty).expect("with_pty failed");
+        )*
+        $(
+            setup = setup.with_plumbing($master_read);
+        )*
+        $(
+            setup = setup.with_plumbing($master_write);
+        )*
+
+        let spawned = setup.spawn($slave).expect("ptyknot failed");
+        let (handles, $knot) = spawned.into_parts();
+        let (pty_opt, pipes) = handles.into_parts();
+        let mut pipes_iter = pipes.into_iter();
+
+        $(
+            #[allow(unused_mut)]
+            let mut $tty = pty_opt.expect("missing pty");
+        )*
+        $(
+            let $master_read = pipes_iter.next().expect("missing pipe");
+        )*
+        $(
+            #[allow(unused_mut)]
+            let mut $master_write = pipes_iter.next().expect("missing pipe");
+        )*
     }
 }
 
@@ -344,7 +345,12 @@ fn pty_slave() {
 #[test]
 fn pty_test() {
     let pty = make_pty().expect("could not make pty");
-    let knot = ptyknot(pty_slave, Some(&pty), &[]).expect("ptyknot fail");
+    let setup = PtyKnotSetup::new().with_pty(pty).expect("with_pty");
+    let spawned = setup.spawn(pty_slave).expect("spawn fail");
+    let (handles, knot) = spawned.into_parts();
+    let (pty_opt, _pipes) = handles.into_parts();
+    let pty = pty_opt.unwrap();
+
     let mut master = BufReader::new(&pty);
     let mut message = String::new();
     master
@@ -365,8 +371,12 @@ fn pipe_slave() {
 fn pipe_test() {
     let pipeout =
         Plumbing::new(PipeDirection::MasterRead, pty_stderr()).expect("could not create pipeout");
-    let knot = ptyknot(pipe_slave, None, &[&pipeout]).expect("ptyknot fail");
-    let pipeout = pipeout.get_master().expect("could not get master");
+    let setup = PtyKnotSetup::new().with_plumbing(pipeout);
+    let spawned = setup.spawn(pipe_slave).expect("spawn fail");
+    let (handles, knot) = spawned.into_parts();
+    let (_pty, mut pipes) = handles.into_parts();
+    let pipeout = pipes.pop().unwrap();
+
     let mut master = BufReader::new(pipeout);
     let mut message = String::new();
     master
@@ -413,11 +423,106 @@ fn plumbing_preserves_parent_standard_descriptors() {
 
         let plumbing = Plumbing::new(PipeDirection::MasterRead, descriptor)
             .expect("could not create plumbing");
-        drop(plumbing.get_master().expect("could not get master"));
+        drop(plumbing.into_parent());
 
         assert!(
             std::fs::metadata(&fd_path).is_ok(),
             "plumbing closed parent standard descriptor: {fd_path}"
         );
     }
+}
+
+#[test]
+fn setup_drop_closes_files() {
+    let pty = make_pty().expect("could not make pty");
+    let fd = pty.as_raw_fd();
+    let setup = PtyKnotSetup::new().with_pty(pty).expect("with_pty");
+    drop(setup);
+
+    // Attempting to read fd should fail because it's closed.
+    let fd_path = format!("/proc/self/fd/{}", fd);
+    assert!(std::fs::metadata(&fd_path).is_err(), "fd was not closed");
+}
+
+#[test]
+fn child_panic_status() {
+    let setup = PtyKnotSetup::new();
+    let spawned = setup.spawn(|| panic!("test panic")).expect("spawn fail");
+    let (_handles, mut knot) = spawned.into_parts();
+
+    let pid = knot.pid.take().expect("missing child pid");
+    let status = pty::waitpid(pid).expect("waitpid failed");
+
+    assert_eq!(status.code(), Some(101), "expected exit status 101");
+}
+
+#[test]
+fn parent_pipe_order_matches_setup_order() {
+    let first = Plumbing::new(PipeDirection::MasterRead, pty_stdout())
+        .expect("could not create first pipe");
+    let second = Plumbing::new(PipeDirection::MasterRead, pty_stderr())
+        .expect("could not create second pipe");
+    let expected = [first.master.as_raw_fd(), second.master.as_raw_fd()];
+
+    let spawned = PtyKnotSetup::new()
+        .with_plumbing(first)
+        .with_plumbing(second)
+        .spawn(|| {})
+        .expect("spawn failed");
+    let (handles, knot) = spawned.into_parts();
+    let (_pty, pipes) = handles.into_parts();
+    let actual = [pipes[0].as_raw_fd(), pipes[1].as_raw_fd()];
+
+    assert_eq!(actual, expected);
+    drop(pipes);
+    drop(knot);
+}
+
+#[test]
+fn closed_standard_descriptor() {
+    let test_binary = std::env::current_exe().expect("could not find test binary");
+    let status = std::process::Command::new(test_binary)
+        .arg("--exact")
+        .arg("closed_standard_descriptor_helper")
+        .arg("--ignored")
+        .arg("--nocapture")
+        .env("PTYKNOT_CLOSED_STDIN_HELPER", "1")
+        .status()
+        .expect("could not run closed-descriptor helper");
+
+    assert!(
+        status.success(),
+        "closed-descriptor helper failed: {status}"
+    );
+}
+
+#[test]
+#[ignore]
+fn closed_standard_descriptor_helper() {
+    if std::env::var_os("PTYKNOT_CLOSED_STDIN_HELPER").is_none() {
+        return;
+    }
+    pty::close(pty_stdin().as_raw_fd()).expect("could not close stdin");
+
+    let pipe =
+        Plumbing::new(PipeDirection::MasterWrite, pty_stdin()).expect("could not create pipe");
+    let spawned = PtyKnotSetup::new()
+        .with_plumbing(pipe)
+        .spawn(|| {
+            let mut input = BufReader::new(stdin());
+            let mut message = String::new();
+            input.read_line(&mut message).expect("could not read stdin");
+            assert_eq!(message.trim(), "hello world");
+        })
+        .expect("spawn failed");
+
+    let (handles, mut knot) = spawned.into_parts();
+    let (_pty, mut pipes) = handles.into_parts();
+    let mut pipe = pipes.pop().expect("missing parent pipe");
+    writeln!(pipe, "hello world").expect("could not write child stdin");
+    drop(pipe);
+
+    let pid = knot.pid.take().expect("missing child pid");
+    let status = pty::waitpid(pid).expect("waitpid failed");
+    assert!(status.success(), "child failed: {status}");
 }

@@ -15,13 +15,17 @@ use std::fs::File;
 use std::io::{Error, ErrorKind, Result};
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::process::ExitStatusExt;
 use std::path::*;
+use std::process::ExitStatus;
 
 use libc::{c_int, pid_t};
 
 mod raw {
+    #[cfg(test)]
+    pub use libc::close;
     use libc::{c_char, c_int};
-    pub use libc::{close, dup2, pipe, waitpid};
+    pub use libc::{dup2, pipe, waitpid};
 
     unsafe extern "C" {
         pub fn grantpt(fd: c_int) -> c_int;
@@ -75,23 +79,21 @@ pub fn ptsname(master: &File) -> Result<PathBuf> {
     Ok(PathBuf::from(os_string))
 }
 
-/// Blocking wait until process completes. Returns the
-/// process exit status. See `waitpid(3)` in the UNIX manual
-/// pages for details.
-pub fn waitpid(pid: i32) -> Result<i32> {
+/// Blocking wait until process completes. Returns the child
+/// process status. See `waitpid(3)` in the UNIX manual pages
+/// for details.
+pub fn waitpid(pid: i32) -> Result<ExitStatus> {
     let mut status: c_int = 0;
     // # Safety
     // `waitpid()` will safely accept an invalid `pid`.
     match unsafe { raw::waitpid(pid as pid_t, &mut status as *mut c_int, 0) } {
         -1 => Err(Error::last_os_error()),
-        _ => Ok(status),
+        _ => Ok(ExitStatus::from_raw(status)),
     }
 }
 
-/// Close a raw file descriptor in the child process.
+#[cfg(test)]
 pub(crate) fn close(fd: RawFd) -> Result<()> {
-    // # Safety
-    // `close()` accepts any raw file descriptor value.
     match unsafe { raw::close(fd) } {
         -1 => Err(Error::last_os_error()),
         _ => Ok(()),

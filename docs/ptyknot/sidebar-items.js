@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["PipeDirection"],"fn":["make_pty","pty_stderr","pty_stdin","pty_stdout","ptyknot"],"macro":[["ptyknot",1]],"mod":["pty"],"struct":["Plumbing","PtyKnot","StdFd"]};
+window.SIDEBAR_ITEMS = {"enum":["PipeDirection"],"fn":["make_pty","pty_stderr","pty_stdin","pty_stdout"],"macro":[["ptyknot",1]],"mod":["pty"],"struct":["ParentHandles","Plumbing","PtyKnot","PtyKnotSetup","Spawned","StdFd"]};
