@@ -23,7 +23,7 @@ mod raw {
     use libc::{c_char, c_int};
     pub use libc::{close, dup2, pipe, waitpid};
 
-    extern "C" {
+    unsafe extern "C" {
         pub fn grantpt(fd: c_int) -> c_int;
         pub fn unlockpt(fd: c_int) -> c_int;
         pub fn ptsname(fd: c_int) -> *const c_char;
