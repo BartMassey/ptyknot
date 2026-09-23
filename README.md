@@ -1,14 +1,18 @@
 # ptyknot: Run a Rust action in a child process on a virtual terminal
-Copyright (c) 2016 Bart Massey
+Bart Massey, Codex and Antigravity 2026
 
-This Rust "crate" provides support for creating a child
-process running a specified action, optionally with a new
-pseudo-tty as its controlling terminal and with parent pipes
-for some of its initial file descriptors. The caller gets
-the master side of the pseudo-tty and pipes for
+This Rust library crate provides support for creating a
+child process running a specified action, optionally with a
+new pseudo-tty as its controlling terminal and with parent
+pipes for some of its initial file descriptors. The caller
+gets the master side of the pseudo-tty and pipes for
 manipulation, along with the process ID of the child. The
 caller can then later wait for the child to exit and examine
 its exit status.
+
+In 2026, AI was used to find and fix numerous bugs and make
+the code run on current Rust. This included a substantial
+API restructuring.
 
 # Documentation
 
@@ -27,9 +31,6 @@ is the primary documentation for this crate.
     implementation that sets a controlling terminal on first
     tty open. The BSD-style `ioctl` to set a controlling
     terminal is not yet supported.
-
-* This code needs careful review. It's probably full of all
-  kinds of badness.
 
 # Credits
 
