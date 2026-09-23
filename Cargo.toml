@@ -9,5 +9,10 @@ keywords = ["pty", "pseudotty", "process"]
 license-file = "LICENSE"
 edition = "2024"
 
+[[example]]
+name = "guessing_game"
+test = true
+
 [dependencies]
 libc = "0.2"
+rand = "0.8.5"
